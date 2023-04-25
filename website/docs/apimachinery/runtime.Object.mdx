@@ -1,0 +1,206 @@
+---
+sidebar_position: 3
+---
+import GithubSVG from '@site/static/img/github-mark.svg';
+import KubernetesSVG from '@site/static/img/kubernetes-mark.svg';
+import RuntimeObjectSVG from '@site/static/img/runtime-object.svg';
+import SingularSVG from '@site/static/img/singular.svg';
+import CollectionSVG from '@site/static/img/collection.svg';
+import SerializerKindSVG from '@site/static/img/serializer-kind.svg';
+
+
+
+# runtime.Object
+
+在本节中，我们会从Kubernetes源码的角度进一步去理解先前的论述——"在Kubernetes中，所有需要**被序列化/反序列化**的Go类型都被称为kind"。
+
+:::note
+需要在这里强调的是，本小节的内容基于文档[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#types-kinds)中关于的*kind*必须要遵循的约定，
+我们认为这是官方开发者想要站在各个语言开发者的角度的一种折中的叙述方案。[🌧️](../intro#约定)
+或者退一步说，我们认为`k8s.io/api`库和`k8s.io/apimachinery`库是基于该文档的一种实现方案。[🌧️](../intro#约定)
+在本小节中我们从Kubernetes源码（Go语言）实现的角度对该文档做进一步的诠释。
+:::
+
+## kind与runtime.Object[^1]
+
+在之前的小结中，我们知道了在Kubernetes中，*kind*是某一类Go类型（如`type Pod struct {...}`，`type Service struct {...}`）的统称。
+这算是一种文字上的总结。
+那么在Kubernetes中，如何从源码角度去描述”所有类型都属于“这种文字性质的总结呢？
+在Go语言中，我们可以通过“所有实现了某个接口的对象都被称为kind”来体现这种文字上的抽象。
+
+回到Kubernetes，在Kubernetes源码中，所有*kind*（`k8s.io/api`）其实都实现了`apimachinery`库中的`runtime.Object`接口。
+换一种叙述方式，也就是:**在Kubernetes中，所有实现了`runtime.Object`接口的Go类型被称为*kind***。
+
+我们先来看看`runtime.Object`接口的具体定义：
+```go title="k8s.io/apimachinery/pkg/runtime/interfaces.go"
+type Object interface {
+	GetObjectKind() schema.ObjectKind
+	DeepCopyObject() Object
+}
+```
+
+这个接口包含两个方法：
+1. `GetObjectKind()`返回的是**另一个**`schema.ObjectKind`接口：
+    ```go title="k8s.io/apimachinery/pkg/runtime/schema/interfaces.go"
+    type ObjectKind interface {
+        SetGroupVersionKind(kind GroupVersionKind)
+        GroupVersionKind() GroupVersionKind
+    }
+    ```
+   `schema.ObjectKind`接口的两个方法用于获取及设置*GVK*信息的。
+   总之，`runtime.Object`的第一个方法实际上规范了实现类必须能够获取/设置本类型对应的*GVK*信息。
+2. `DeepCopyObject()` 看起来是个非常基础的方法，即实现类需要提供一个能够深拷贝自身的方法。[🎈](../intro#约定)
+
+<RuntimeObjectSVG style={{height: "560px"}} />
+
+:::tip
+相比于在之前小节中对*kind*偏向于概念性的总结，在本小节中，我们侧重于真正从源码实现的角度给出*kind*的定义。
+:::
+
+另外，需要在这里提及的是在`apimachinery`库中，`metav1.TypeMeta`类[^2]实现了`runtime.Object`接口的**第一个方法**`GetObjectKind() schema.ObjectKind`，
+并且它包含的类成员也符合[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#resources)中关于元字段名称的要求[^3]。[🎈](../intro#约定)
+
+
+## kind的三类
+在之前的小节中，我们基于[Kubernetes API Reference Doc <KubernetesSVG />](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/)总结了*kind*的三个种类，
+但也仍是通过文字性的叙述去描述每种分类。
+其中kind的第三个种类比较特殊，类型之间并没有共同的规范或者约定，接下来我们将从源码的角度给出kind前两类需要遵循的实现规范。
+
+### 单体类型
+对于单体类型，除了最基本地要实现`runtime.Object`接口外，它们还需要实现`metav1.Object`接口：
+```go title="pkg/apis/meta/v1/meta.go"
+type Object interface {
+	GetNamespace() string
+	SetNamespace(namespace string)
+	GetName() string
+	SetName(name string)
+	GetGenerateName() string
+	SetGenerateName(name string)
+	GetUID() types.UID
+	SetUID(uid types.UID)
+	GetResourceVersion() string
+	SetResourceVersion(version string)
+	// ...
+}
+```
+从接口的定义可以看出单体类型需要提供获取/设置一些元信息例如名称（name），命名空间（namespace），标签（labels）注解（annotations）等的方法。
+
+
+<SingularSVG style={{height: "420px"}} />
+
+另外，需要在这里提及的是`apimachinery`库中，
+`metav1.ObjectMeta`类实现了`metav1.Object`接口并且类成员符合[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#objects)中关于单体类型元字段的规范[^4]。[🎈](../intro#约定)
+
+
+### 集合类型
+对于集合类型，除了要实现`runtime.Object`接口外，它们还需要实现`metav1.ListInterface`接口：
+```go title="pkg/apis/meta/v1/meta.go"
+type ListInterface interface {
+	GetResourceVersion() string
+	SetResourceVersion(version string)
+	GetSelfLink() string
+	SetSelfLink(selfLink string)
+	GetContinue() string
+	SetContinue(c string)
+	GetRemainingItemCount() *int64
+	SetRemainingItemCount(c *int64)
+}
+```
+除了接口上的规范，对于集合种类，根据[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#types-kinds)，它们在实现上还**必须**要包含名为`Items`的切片成员。
+
+<CollectionSVG style={{height: "420px"}} />
+
+
+另外，需要在这里提及的是在`apimachinery`库中，`metav1.ListMeta`类实现了`metav1.ListInterface`接口，**但是并没有包含[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#types-kinds)所要求的`Items`字段**[^5]。[🎈](../intro#约定)
+
+
+## 初识[^6]序列化器
+`runtime.Object`接口本身其实并没有包含与编/解码直接相关的方法。
+那之前小节中我们所说的"所有需要**被序列化/反序列化**的Go类型都被称为kind"又该如何理解呢？
+为了说清楚这个问题，我们需要从`apimachinery`库的序列化原理说起。
+我们在这里先给出结论，在后续[序列化器与序列化器工厂](./serializer)章节我们还会给出具体介绍`apimachinery`库的序列化原理。
+
+在`apimachinery`库中，**直接**参与对kind编/解码操作的是*序列化器（serializers）*[^7]。
+而`apimachinery`库中的序列化器依赖于一个叫做`runtime.Scheme`[^8]类型而存在（其实就是序列化器类型包含一个`runtime.Scheme`类型的成员）。
+对于`runtime.Scheme`类型，你可以简单把它理解成一张可以"注册"Go类型的"注册表"。
+**只有在`scheme`[^9]中“注册”过的Go类型才可以被序列化器序编/解码**。
+
+
+## runtime.Scheme与kind
+
+在上一小节中，我们在介绍`apimachinery`库中的序列化器时引入了`runtime.Scheme`类型。
+那么在前文所谓的“注册”类型具体指什么呢？
+在`runtime.Scheme`中存在一个`map`类型的成员(映射表)[^10]——`gvkToType`:
+```go title="k8s.io/apimachinery/pkg/runtime/scheme.go"
+type Scheme struct {
+
+	gvkToType map[schema.GroupVersionKind]reflect.Type
+	
+	// ...
+}
+
+```
+同时，`runtime.Scheme`也对外提供了往此`map`中插入（注册）数据的方法：
+```go title="k8s.io/apimachinery/pkg/runtime/scheme.go"
+func (s *Scheme) AddKnownTypeWithName(gvk schema.GroupVersionKind, obj Object) {
+   // ...
+}
+```
+
+我们不需要关心这个方法的具体实现，我们现在只需要知道此方法可以将类型为`runtime.Object`（即参数`obj`）的对象以及对应的GVK信息（参数`gvk`）注册进`gvkToType`这张表中[^4]。
+也就是说，`Scheme`只能注册**`runtime.Object`类型的对象**。
+而根据之前的定义，*kind*就是实现了`runtime.Object`接口的Go类型的统称，所以，我们可以说`Scheme`类型用于注册kind。
+
+<SerializerKindSVG style={{width: "95%"}}/>
+
+:::tip 
+至此，从kind与`runtime.Object`的关系，从序列化器与`runtime.Scheme`关系，从`runtime.Scheme`与`runtime.Object`的关系，
+我们从源码的角度阐述了——在Kubernetes中，任何需要序列化/反序列化的Go类型统称为*kind*。
+:::
+
+
+[^1]: 本文中所出现的`runtime`指`apimachinery`库下`runtime`包。
+[^2]: 本文中所出现的`metav1`指`apimachinery`库`meta`包的`v1`子包。
+[^3]:  由于撇开了具体语言，文档[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#types-kinds)中关于*kind*的实现约定只能是对元字段做出具体要求（如字段名称等）。
+       文档要求*kind*需要有名为`kind`以及`apiversion`字段分别表示类型名称以及分组和版本信息。`apimachinery`库在序列化资源时也确实会检查这两个字段:
+       ```go title="k8s.io/apimachinery/pkg/api/meta/help.go"
+       func (SimpleMetaFactory) Interpret(data []byte) (*schema.GroupVersionKind, error) {
+            findKind := struct {
+            	// +optional
+            	APIVersion string `json:"apiVersion,omitempty"`
+            	// +optional
+            	Kind string `json:"kind,omitempty"`
+            }{}
+            if err := json.Unmarshal(data, &findKind); err != nil {
+            	return nil, fmt.Errorf("couldn't get version/kind; json parse error: %v", err)
+            }
+            gv, err := schema.ParseGroupVersion(findKind.APIVersion)
+            if err != nil {
+            	return nil, err
+            }
+            return &schema.GroupVersionKind{Group: gv.Group, Version: gv.Version, Kind: findKind.Kind}, nil
+       }
+       ```
+[^4]: 根据[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#objects)，
+      对于单体种类，它们**必须**包含名为`metadata`字段，同时在`metadata`字段下必须要有名为`namespace`，`name`，`uid`等字段。
+[^5]: `metav1.ListMeta`并不完全符合关于集合种类的约定。根据[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#types-kinds)，
+      对于集合种类，它们还需要包含名为`items`的数组字段（对于Go类型，即为`Items`的切片成员）用于存放单体资源。
+      至于`metav1.ListMeta`并没有加入`Items`的切片成员的原因，我们认为`Items`切片不同于`Kind`或者`Name`它并不应属于**元**信息范畴。[🌧️](../intro#约定)
+      在`apimachinery`库中在判断类型是否为集合种类的函数确实有针对`Items`字段的检查：`IsListType`(`k8s.io/apimachinery/pkg/api/meta/help.go`)。它的函数文档中也明确说明了：
+
+      > IsListType returns true if the provided Object has a slice called Items.
+
+      也就是说它是通过检查类型中是否存在一个`Items`的slice字段来判断是否为集合。
+      同时，在此函数的`TODO`信息中，我们可以看到这样一句话：
+      > TODO: Replace the code in this check with an interface comparison by
+      > creating and enforcing that lists implement a list accessor.
+
+      这句话说明通过检查类型中是否含有`Items`字段在官方开发者看来确实并不是一个好的方式，在将来而是需要通过检查类型是否实现了`metav1.ListInterface`接口来判断。
+      所以在将来`metav1.ListInterface`可能会加上类似于`GetItems()`的方法。[🌧️](../intro#约定)
+
+[^6]: 在后续[序列化器与序列化器工厂](./serializer)小节我们还会对`apimachinery`中的序列化器做进一步介绍。
+[^7]: 这里的*序列化器*并不指代`apimachinery`库中**某一个具体**的类型，在`apimachinery`库中有多种序列化器。
+[^8]: 注意与前文提到的schem**<u>a</u>**包区分，此处为runtime包下的Schem**<u>e</u>**类型。
+[^9]: 在不作另外说明的情况下，本书所出现的`scheme`表示`runtime.Scheme`类型的实例。
+[^10]: `runtime.Scheme`中，不仅仅存在`gvkToType`这一张映射表，同时，方法`AddKnownTypeWithName`也不仅仅向一张映射表中插入数据。
+      我们在这尽量抹去实现上的一些细节，侧重于说明`runtime.Scheme`的一个重要作用——注册。

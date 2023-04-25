@@ -1,0 +1,358 @@
+---
+sidebar_position: 2
+---
+import KubernetesSVG from '@site/static/img/kubernetes-mark.svg';
+import GitHubSVG from '@site/static/img/github-mark.svg';
+import GVRSVG from '@site/static/img/gvr.svg';
+import Kind3PNG from '@site/static/img/kind3.png';
+
+# GVK
+在本节中，我们将介绍*GVK*的概念，同时会进一步扩充前面[初识kind](./kubernetes-api#初识kind)小节引入的*kind*概念。
+
+## GVR
+
+通常，对于一个Kubernetes API URL，我们可以从中提取出它的group，version，以及resource type信息，例如：
+<GVRSVG style={{height: "120px"}}/>
+
+
+我们也可以认为**资源类型依属于API分组和版本而存在**。
+由group，version，以及resource type这三个信息（字符串）组成的三元组被称为*GroupVersionResource*，简称*GVR*[^1]。
+
+实际上*GVR*的概念来源于`apimachinery`库中一个简单的结构体：
+```go title="k8s.io/apimachinery/runtime/schema/group_version.go"
+type GroupVersionResource struct {
+	Group    string
+	Version  string
+	Resource string
+}
+```
+我们其实甚至可以这样理解，先有了源码定义的结构体，再衍生出了相关术语和概念。[🌧️️](../intro#约定)
+
+## GVK
+在之前的小结中，我们介绍了每种资源类型都对应一个Go类型——*kind*，而资源类型又依属于API分组和版本而存在。相应地，kind也有分组和版本的概念。
+资源类型是Kubernetes API URL中特定位置的一个标识，不同于分组和版本在URL上的表现形式，在Kubernetes源码中（`k8s.io/api`），
+kind的不同版本（或分组）被定义在不同的目录（包）下以作区分。
+例如，`horizontalpodautoscaler`在Kubernetes系统中同时存在多个版本，`v1`，`v2`等[^2]。
+`HorizontalPodAutoscaler`类型则分别定义在`k8s.io/api`库的`autoscaling/`包中的子包`v1`，`v2`中。
+```text title="k8s.io/api"
+autoscaling/
+|-- v1
+|   `-- types.go
+|-- v2
+|   `-- types.go
+|-- v2beta1
+|   `-- types.go
+`-- v2beta2
+    `-- types.go
+```
+与*GroupVersionResource*概念类似，kind也有一个与之对应的概念*GroupVersionKind*。
+在Kubernetes中，由Go类型**本身的名称**和此类型对应的Group，Version三个字符串组成的三元组被成为*GroupVersionKind*，简称*GVK*。
+它在`apimachinery`库中对应的数据结构为：
+```Go title="k8s.io/apimachinery/runtime/schema/group_version.go"
+type GroupVersionKind struct {
+	Group    string
+	Version  string
+	Kind     string
+}
+```
+
+例如，`Job`类的名字为`Job`，由`Job`，`batch`（分组），`v1`（版本） 三个**字符串**组成的三元组即为*GVK*。
+
+我们可以通过`kubectl api-resources`命令查看集群中的：
+
+[comment]: # (TODO: 这里需要解释为什么会同时存在两个类似的概念？它们的区别是什么？)
+
+## 再识kind
+在之前的章节中，我们从*资源类型（resource type）*的角度引入了kind，其实kind的概念却要更广。
+在Kubernetes系统中，**任何需要被序列化/反序列化（以用于在网络中传输或者落盘）的Go类型都被称为*kind***[^3]。
+
+例如，根据[Kubernetes API Reference Doc <KubernetesSVG />](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#job-v1-batch)，我们可以通过如下RESTful请求：
+```
+GET /apis/batch/v1/namespaces/{namespace}/jobs
+```
+来获取某个`namespace`下面所有的job资源。
+下面是一个上述请求返回体（JSON格式）[^4]的例子：
+```json
+{
+    "apiVersion": "batch/v1",
+    "kind": "JobList",
+    "metadata": {
+        "resourceVersion": ""
+    }
+    "items": [
+        {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {
+                "creationTimestamp": "2021-11-02T09:06:03Z",
+                "name": "debug-b392ad51-b656-3af0-8718-0f96d09a92cf",
+                "namespace": "default",
+                "resourceVersion": "223357957",
+                "uid": "28b061c5-d1ba-4a2e-8aa8-88bf216c2b2f"
+            },
+            "spec": {
+                "backoffLimit": 0,
+                "completions": 1,
+                "parallelism": 1,
+                "selector": {
+                    "matchLabels": {
+                        "controller-uid": "28b061c5-d1ba-4a2e-8aa8-88bf216c2b2f"
+                    }
+                },
+                "template": {
+                    "metadata": {
+                        "creationTimestamp": null,
+                        "labels": {
+                            "controller-uid": "28b061c5-d1ba-4a2e-8aa8-88bf216c2b2f",
+                            "job-name": "debug-b392ad51-b656-3af0-8718-0f96d09a92cf"
+                        }
+                    },
+                    "spec": {
+                        "containers": [
+                            {
+                                "image": "busybox",
+                                "imagePullPolicy": "IfNotPresent",
+                                "name": "debug-pod"
+                            }
+                        ],
+                        "restartPolicy": "Never"
+                    }
+                }
+            },
+            "status": {
+                "active": 1,
+                "startTime": "2021-11-02T09:06:03Z"
+            }
+        }
+    ]
+}
+```
+根据文档说明，请求返回体（被编码前）对应的Go类型为`JobList`：
+```go title="k8s.io/batch/v1/types.go"
+type JobList struct {
+	metav1.TypeMeta
+	metav1.ListMeta
+
+	Items []Job
+}
+```
+显然这个类型并不**直接**对应任何*资源类型*，它表示的是`jobs`资源的**集合**，其中`Items`字段正是`Job`类型的切片。
+
+再比如，当我们想要删除一个job资源的时候，根据文档，我们可以通过如下RESTful请求：
+```
+DELETE /apis/batch/v1/namespaces/{namespace}/jobs/{name}
+```
+一个请求体[^4]样例为：
+```json
+{
+  "kind": "DeleteOptions",
+  "apiVersion": "meta.k8s.io/v1",
+  "gracePeriodSeconds": 1,
+  "preconditions": {
+    "uid": "uidValue",
+    "resourceVersion": "resourceVersionValue"
+  },
+  "orphanDependents": true,
+  "propagationPolicy": "propagationPolicyValue",
+  "dryRun": [
+    "dryRunValue"
+  ]
+}
+```
+该请求体对应的Go类型为`DeleteOptions`：
+```go title=“k8s.io/apimachinery/pkg/apis/meta/v1/types.go”
+type DeleteOptions struct {
+	TypeMeta
+
+	GracePeriodSeconds *int64
+
+	Preconditions *Preconditions
+
+	OrphanDependents *bool
+
+	PropagationPolicy *DeletionPropagation
+
+	DryRun []string
+}
+```
+该请求对应的一个返回样例为：
+```json
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Success",
+  "details": {
+    "name": "my-job",
+    "kind": "jobs"
+  },
+  "code": 200
+}
+```
+该请求的返回体（被编码前）对应的Go类型为`Status`：
+```go title="k8s.io/apimachinery/pkg/apis/meta/v1/types.go"
+type Status struct {
+	ListMeta
+
+	Status string
+
+	Message string
+
+	Reason StatusReason
+
+	Details *StatusDetails
+
+	Code int32
+}
+```
+此类型中`Status`字段（字符串）表示删除操作的结果：`Success`或者`Failure`， `Code`字段（整型）与HTTP的状态码相对应。
+除此以外，**对于任何请求，`kube-apiserver`如果处理异常或者失败（HTTP状态码非`2xx`时），都会返回这个`Status`类型编码后的JSON格式数据**。例如：
+```bash
+$ curl -v -k -H "Authorization: Bearer WhCDvq4VPpYhrcfmF6ei7V9qlbqTubUc" https://10.240.122.184:443/api/v1/namespaces/default/pods/grafana
+
+> GET /api/v1/namespaces/default/pods/grafana HTTP/1.1
+> User-Agent: curl/7.26.0
+> Host: 10.240.122.184
+> Accept: */*
+> Authorization: Bearer WhCDvq4VPpYhrcfmF6ei7V9qlbqTubUc
+>
+
+< HTTP/1.1 404 Not Found
+< Content-Type: application/json
+< Date: Wed, 20 May 2015 18:10:42 GMT
+< Content-Length: 232
+<
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {},
+  "status": "Failure",
+  "message": "pods \"grafana\" not found",
+  "reason": "NotFound",
+  "details": {
+    "name": "grafana",
+    "kind": "pods"
+  },
+  "code": 404
+}
+```
+显然`DeleteOptions`和`Status`都不对应任何*Kubernetes资源类型*。
+
+这些特殊的kind有些例如`DeleteOptions`被放置在“meta.k8s.io”这个特殊的分组中（也就是它对应的GVK信息中中Group字段为“meta.k8s.io”），它的版本则被置为`v1`。
+有的（例如`Status`）可以被认为所属于*历史遗留组（legacy group）*，它对应的GVK信息中Group用一个空字符串表示，它的版本则被置为`v1`。
+
+基于[Kubernetes API Reference Doc <KubernetesSVG />](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/)，我们可以将kind总结为三类：
+* *Kubernetes资源类型*对应的Go类型：如`Pod`，`Job`。（在后续章节中，我们会简称此类型为*单体类型*）
+* 集合类型：*Kubernetes资源*[^5]对应的集合类型，如`PodList`，`JobList`。
+* 其他特殊或元类型： 如`DeleteOptions`，`Status`，`WatchEvent`等[^6]。
+
+这三种类型如下图所示：
+<img src={Kind3PNG} style= {{width: "95%"}}/>
+
+
+另外，需要注意的是Kubernetes原生资源的kind（单体种类和集合种类）被定义在`k8s.io/api`库中，通用或者特殊的kind则被定义在`k8s.io/apimachiery`库中。
+
+
+## 小结
+
+:::tip
+本小节中我们从*GVR*引入了*GVK*，意在指出：*kind*和*资源类型*一样必须依赖于API分组及版本而存在。
+
+同时我们又从序列化/反序列化的角度进一步扩充了Kubernetes *kind*的概念并且根据[Kubernetes API Reference Doc <KubernetesSVG />](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#job-v1-batch)总结了
+kind的三种类型。其中第三个种类比较特殊，类型之间并没有共同的规范或者约定。但需要注意的是，**它们仍要依赖于API分组及版本而存在**。这些知识在后续章节中有重要应用。
+
+另外，对于kind前两个种类，它们在源码实现上还需要遵循具体的约定，在后续[kind的三类](./runtime.Object#kind的三类)小节我们还会继续介绍它们。
+:::
+
+
+
+[comment]: # (TODO[correctness]: 第三种应该还包括subresource)
+
+
+[//]: # (因此，想要唯一确定一种资源类型，我们还需要API组和版本的信息。group，version，resource type组成的三元组被称为GroupVersionResource。)
+
+
+
+[^1]: 在本小节中，我们介绍*GVR*的目的仅仅是为了引出*GVK*的概念。本书所讨论的内容并不依赖于*GVR*。
+    GVR概念在`kube-apiserver`组件以及`kubectl`命令行工具中有重要应用。对于`kube-apiserver`来说，它需要完成从HTTP Path中包含的GVR信息到具体Go类型的映射和转换。
+    而对于`kubectl`工具, 我们使用的命令例如：
+    ```bash
+    $ kubectl get pods {pod}
+    ```
+    其中`pods`正是*资源类型*的概念。因此，`kubectl`库中也需要完成GVR到具体Go类型的转换。
+    与这种映射和转换相关的重要数据类型是`RESTMapper`，它被定义在`apimachinery`库中，但这不在本书的讨论范围之内，请参考[Kubernetes API请求的生命周期](../intro#扩展阅读)。
+[^2]: `autoscaling/v2beta1`API版本在Kubernetes v1.8中引入，`autoscaling/v2beta2`API版本在Kubernetes v1.12中引入，在Kubernetes v1.23已经正式升级成稳定版（stable或者也被成为general availability(GA)）：`autoscaling/v2`。
+      同时，`autoscaling/v2beta1`在Kubernetes v1.24中停止维护，`autoscaling/v2beta2`在Kubernetes v1.25中停止维护。
+      不同的版本代表不同级别的稳定性以及不同程度的官方维护和支持。具体请参考[API versioning <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/#api-versioning)或者[API Changes <GitHubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api_changes.md#alpha-beta-and-stable-versions)。
+[^3]: 本书所提及的序列化特指**在Kubernetes基础库（`apimachinery`, `client-go`, `api-server`）上下文中**。在Kubernetes中，序列化除了基本的序列化操作外，还包括一些特殊的机制。
+
+      理论上，我们当然也可以不借助`apimachinery`库提供的序列化工具，用Go的`net/http`，`json.Unmarshal`和`json.Marshal`就可以完成向Kubernetes API发起请求以及对Kubernetes kind的编解码，
+      例如：
+      ```bash
+      # Extract the Cluster Certificate Authorithy （PEM）
+      $ kubectl config view --minify --raw --output 'jsonpath={..cluster.certificate-authority-data}' | base64 -d
+      ...
+
+      # Extract the Client Certificate （PEM）
+      $kubectl config view --minify --raw --output 'jsonpath={..user.client-certificate-data}' | base64 -d
+      ...
+      我们先获取与Kubernetes API TLS通信的证书和密钥。
+
+      # Extract the Client Private Key （PEM）
+      $ kubectl config view --minify --raw --output 'jsonpath={..user.client-key-data}' | base64 -d
+      ```
+      ```go
+      package main
+
+      import (
+      	"crypto/tls"
+      	"crypto/x509"
+      	"encoding/json"
+      	"flag"
+      	"io"
+      	v1 "k8s.io/api/batch/v1"
+      	"net/http"
+      	"os"
+      )
+
+      var (
+      	certFile = flag.String("cert", "client.crt", "A PEM encoded certificate file.")
+      	keyFile  = flag.String("key", "client.key", "A PEM encoded private key file.")
+      	caFile   = flag.String("ca-cert", "ca.crt", "A PEM encoded CA's certificate file.")
+      	kubeAPI  = flag.String("kube-api", "https://127.0.0.1:6443", "Kubernetes API prefix.")
+      )
+
+      func main() {
+
+      	flag.Parse()
+
+      	caCert, _ := os.ReadFile(*caFile)
+      	caCertPool := x509.NewCertPool()
+      	caCertPool.AppendCertsFromPEM(caCert)
+      	cert, _ := tls.LoadX509KeyPair(*certFile, *keyFile)
+
+      	client := &http.Client{
+      		Transport: &http.Transport{
+      			TLSClientConfig: &tls.Config{
+      				RootCAs:      caCertPool,
+      				Certificates: []tls.Certificate{cert},
+      			},
+      		},
+      	}
+
+      	r, _ := client.Get(*kubeAPI + "/apis/batch/v1/namespaces/default/jobs/my-job")
+      	bytes, _ := io.ReadAll(r.Body)
+
+      	_ = json.Unmarshal(bytes, &v1.Job{})
+
+      }
+      ```
+      我们使用`net/http`库直接向Kubernetes API发起请求，并用`json.Unmarshal`完成对返回体的解码。
+
+      理论上甚至我们可以用任意语言实现一个自定义控制器（只要可以使用HTTP和Kubernetes API交互）。
+      在本书中，为了充分利用Kubernetes基础库本身提供的组件来减少代码量，我们将要实现的极简版自定义控制器仍然基于`client-go`和`apimachinery`。
+
+[^4]: 本小节中*请求体*或者*返回体*都是指JSON数据格式。
+[^5]: 注意此处为*Kubernetes资源*而非*Kubernetes对象*，也就是说对于*虚拟资源*，它们同样有相应的集合类型。
+[^6]: 在Kubernetes中，第三种特殊类型共包括：`ListOptions`，`GetOptions`，`DeleteOptions`，`CreateOptions`，`UpdateOptions`，`PatchOptions`，`Status`，`WatchEvent`，`InternalEvent`，`APIVersions`，`APIGroupList`，`APIGroup`，`APIResourceList`。
+

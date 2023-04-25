@@ -1,0 +1,172 @@
+---
+sidebar_position: 4
+---
+
+import SerializerBasicSVG from '@site/static/img/serializer-basic.svg';
+import SerializerAdvanceSVG from '@site/static/img/serializer-advance.svg';
+
+
+# 序列化器与序列化器工厂
+
+在本节中我们将深入介绍一下`apimachinery`库中的序列化器和序列化工厂。
+
+:::note
+对于`apimachinery`库中序列化器的编/解码流程，我们不会照搬大段源码并做行级别的解释。它的实现为了考虑各种情况远比我们想象的要复杂。
+本节介绍的序列化内容仍然是为了服务于本书的目标——能够理解最后实现的精简自定义控制器代码。
+:::
+
+
+## JSON序列化器
+在之前的小节中，我们引入了序列化器的概念，并且知道`apimachinery`库中的序列化器需要依赖`scheme`才能工作。
+接下来我们从源码的角度先介绍`apimachinery`库中**最为基础**的序列化组件JSON序列化器的解码流程。
+
+```go title="k8s.io/apimachinery/pkg/runtime/serializer/json/json.go"
+type Serializer struct {
+	meta    MetaFactory
+	options SerializerOptions
+	creater runtime.ObjectCreater
+	typer   runtime.ObjectTyper
+
+	identifier runtime.Identifier
+}
+```
+我们将重点关注`meta`，`creater`，`typer`这三个编解码过程中涉及到的核心成员类。
+你可能发现并没有与`runtime.Scheme`类相关的成员类，那么这个基础的JSON序列化组件难道不需要`scheme`就可以工作吗？
+事实并非如此，正如前文所说，JSON序列化器是`apimachinery`库中最为基础的组件，
+官方开发者特意在实现上做了更进一步的抽象——它并不直接依赖于`runtime.Scheme`对象，而是任何与`runtime.Scheme`有同等能力的类型都可以。 
+具体来说，只要实现了`runtime.ObjectCreater`和`runtime.ObjectTyper`两个接口的类型都可以，其中：
+* `runtime.ObjectTyper`所要表述的能力是：给定一个`runtime.Object`对象，判定此对象是否被*认可（recognize）*[^1]；
+* `runtime.ObjectCreater`所要表述的能力是：给定一个*GVK*三元组信息，能够创建此*GVK*对应Go类型的实例；
+
+而`runtime.Scheme`的确实现了`runtime.ObjectCreater`和`runtime.ObjectTyper`接口。
+并且，`apimachinery`库中在初始化`Serializer`对象的成员变量`creater`和`typer`时使用的确实是一个`scheme`对象。
+
+`meta`的作用是从原始JSON字节序列（`bytes[]`）中**强行**推理（interpret）出此字节序列包含的`GVK`信息。具体实现上也十分简单清晰：
+```go title="k8s.io/apimachinery/pkg/runtime/serializer/json/meta.go"
+func (SimpleMetaFactory) Interpret(data []byte) (*schema.GroupVersionKind, error) {
+	findKind := struct {
+		// +optional
+		APIVersion string `json:"apiVersion,omitempty"`
+		// +optional
+		Kind string `json:"kind,omitempty"`
+	}{}
+	if err := json.Unmarshal(data, &findKind); err != nil {
+		return nil, fmt.Errorf("couldn't get version/kind; json parse error: %v", err)
+	}
+	gv, err := schema.ParseGroupVersion(findKind.APIVersion)
+	if err != nil {
+		return nil, err
+	}
+	return &schema.GroupVersionKind{Group: gv.Group, Version: gv.Version, Kind: findKind.Kind}, nil
+}
+```
+在函数中预先声明了一个仅包含`APIVersion`以及`Kind`的空结构体，尝试先将字节序列解码为此结构来获取此字节序列的原始`gvk`的信息。
+```go
+findKind := struct {
+    // +optional
+    APIVersion string `json:"apiVersion,omitempty"`
+    // +optional
+    Kind string `json:"kind,omitempty"`
+}{}
+```
+
+在正式介绍JSON序列化器的解码方法之前，我们先看一下`apimachinery`库中约定的解码器所需要实现的接口：
+```go
+type Decoder interface {
+	Decode(data []byte, defaults *schema.GroupVersionKind, into Object) (Object, *schema.GroupVersionKind, error)
+}
+```
+通常，对于一个解码函数，它的签名应该类似于`Decode(data []byte) (Object, error)`，它的作用顾名思义就是把一段字节序列转化为一个Go对象。
+
+而在`apimachinery`库中约定的`Decode()`方法中，除了原始字节序列数据`data`这个参数以外，还需要`defaults`以及`into`两个参数。解码方法这样设计的原因是提供了更多的灵活性。
+官方开发者希望解码器能够：
+1. 通过原始字节序列（`data`）包含的gvk信息以及调用者提供的GVK信息（`defaults`）共同推断出一个可能的gvk[^2]；
+2. 如果调用者已经预先提供了解码后的目标对象（`into`），解码器应该尽量使用调用者提供的而避免在内存中再分配一个新对象[^3]。
+
+接下来我们用图示的方式给出JSON序列化器的解码流程。
+
+<SerializerBasicSVG style={{"width": "95%"}}/>
+
+<SerializerAdvanceSVG style={{"width": "100%"}}/>
+
+相比于解码流程，编码流程相当简单，我们在这里不再做赘述。
+
+
+## 序列化器工厂CodecFactory
+
+在`apimachinery`库中，上述的JSON序列化器其实是一个基础组件，通常在Kubernetes中我们使用的是更上层的序列化器封装`CodecFactory`：
+```go
+type CodecFactory struct {
+	scheme    *runtime.Scheme
+	universal runtime.Decoder
+	accepts   []runtime.SerializerInfo
+
+	legacySerializer runtime.Serializer
+}
+```
+
+`CodecFactory`实现了`NegotiatedSerializer`[^4]这个核心接口:
+```go title="k8s.io/apimachinery/pkg/runtime/interfaces.go"
+type NegotiatedSerializer interface {
+	SupportedMediaTypes() []SerializerInfo
+
+	EncoderForVersion(serializer Encoder, gv GroupVersioner) Encoder
+	DecoderToVersion(serializer Decoder, gv GroupVersioner) Decoder
+}
+```
+1. `SupportedMediaTypes()`表示实现类需要同时支持多种数据格式（例如JSON，YAML，protobuf）的编解码，换句话说，实现类需要集成多种数据格式的序列化器。
+2. `EncoderForVersion()`以及`DecoderToVersion()`表示实现此接口的工厂类需要提供**可以将资源编/解码成某个指定版本**的编解码器——将资源在解码**后**或者编码**前***转换（convert）*成指定版本（version），例如将某资源的`v1beta1`版本转换为`v1`版本[^3]。
+    需要注意的是实现类`CodecFactory`同时也提供了`WithoutConversion()`方法以获取不带资源版本转化功能的编解码器。[🎈](../intro#约定)
+
+我们再稍微介绍`CodecFactory`类中的一些重要成员:
+* `scheme`成员——序列化器在编解码前需要检查`scheme`中注册的类型。
+* `accepts`切片包含多种数据格式的序列化器，上述的JSON序列化器只是其中的一种。
+* `universal`成员的作用是提供了一个**通用**快捷的**解码**器，它能够识别字节序列的数据格式（例如判定数据是属于JSON还是YAML）再找到对应的序列化器进行解码。
+
+
+
+## ParameterCodec
+上述的`CodecFactory`主要用于HTTP**请求/返回体**以及**写入/读取**etcd的编解/码。在Kubernetes中，还需要一种特殊的"编解码器"[^5]，它的作用是负责HTTP URL参数（Query Parameters）与Go对象之间的转换。
+例如，Go对象`metav1.ListOptions{Limit: 1, LabelSelector: "app=foo"}`[^6]将会解码成URL参数`limit=1&app%3D=foo`。
+另外，值得注意的是，`ParameterCodec`编解码器仍然依赖于`Scheme`注册机制工作。也就是说，`ListOptions`类型也同样需要事先注册进`scheme`中。
+
+## 小结
+:::tip
+本节介绍的`apimachinery`库中`CodecFactory`以及`ParameterCodec`两个类型在我们实现自定义控制器的客户端有着重要应用。
+:::
+
+
+[^1]: *认可（recoginize）*在这里是一种对应接口层级的抽象表述。只有被*认可*的对象才肯以被序列化。`Scheme`的*注册*即是一个具体实现*认可*的机制。
+[^2]: 这样设计的一个好处是对于原始数据未包含gvk信息的情况（空字符串），我们可以通过调用者提供的gvk信息（`defaults`）甚至是`into`的gvk信息兜底。
+      当然，这种灵活性也带来了实现上的不方便。尤其是原始数据包含的实际gvk信息和调用者提供的gvk信息以及`into`的gvk不一致的情况。
+      因此在编码器接口的实现中（例如JSON序列化器），有相当一部分逻辑在处理这种情形。
+[^3]: 资源不同版本的转化是Kubernetes**服务端**处理资源请求的重要部分，通过将资源转化成一个内部版本(internal/hub version)以便对不同版本的资源**统一进行相关逻辑的处理**。
+      我们在这里仅给出一个Kubernetes服务端资源版本转换发生的一般流程（改编自社区文档[API Changes](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api_changes.md#operational-overview)）：
+        1. A user POSTs a Pod object to /api/v7beta1/...
+        2. The JSON is unmarshalled into a v7beta1.Pod structure
+        3. Default values are applied to the v7beta1.Pod
+        4. The v7beta1.Pod is converted to an hub.Pod internal version
+        5. The hub.Pod is validated, and any errors are returned to the user
+        6. The hub.Pod is converted to a v6.Pod (because v6 is the latest stable version)
+        7. The v6.Pod is marshalled into JSON and written to etcd
+
+      相关内容不在本书讨论范围之内，请参考参考[Kubernetes API请求的生命周期](../intro#扩展阅读)，以及kubebuider对于[hub version](https://book.kubebuilder.io/multiversion-tutorial/conversion-concepts.html)概念的介绍
+      `apimachinery`库中实现了一个带有资源版本转换功能的编解码器`codec`(`k8s.io/apimachinery/pkg/runtime/serializer/versioning`)，对于编/解码功能，它仍然基于的是基础序列化器。
+      由于所有资源类型的Kubernets API URL中都有分组和版本信息，client端发送的请求和接受到的返回中的资源分组及版本都是确定的，因此在client端的序列化器没有版本转换的需求。
+
+[^4]: 官方开发者用*Negotiated(协商)*命名此核心接口是因为这个序列化器通常在被用于Server端时可以执行*[HTTP内容协商（HTTP Content negotiation）](https://developer.mozilla.org/en-US/docs/Web/HTTP/Content_negotiation)*。
+      *HTTP内容协商*是指在返回资源请求时如何选择特定的数据表示形式（尤其是客户端在请求资源时没有通过HTTP的`Accept`头明确指定接受格式时）。这使得上层封装的序列化器需要支持/集成多种数据类型的编/解码器。
+      
+      除此以外，在kubernetes Server端组件，例如`apiserver`中，需要将对资源的不同版本的请求通通转换为一个内部版本（`APIInternalVersion`或者也被称作`HubVersion`）以便对不同版本的资源**统一进行相关逻辑的处理**。这种资源版本在server端的转化也可以理解成一种server**内部**对资源版本的协商。[🌧️](../intro#约定)
+      我们可以找到官方开发者对`negotiatedSerializerWrapper`的这样一段注释：
+      > TODO: We should split negotiated serializers that we can change versions on from those we can change
+      > serialization formats on
+      
+      意思是说"我们应该将可以协商（资源）版本的序列化器与可以协商序列化格式的序列化器分开"。在官方开发者看来，资源版本的内部转换也可以称之为*协商*。[🌧️](../intro#约定)
+      
+      因此，`NegotiatedSerializer`中所谓的*协商*可视为两个层次: i) 数据格式 ii)  资源版本转换
+[^5]: 通常我们所说的*序列化器*或者*编解码器*是指字节序列与Go对象之间的转化，此处的"编解码器"并不能归为此类，它的作用是HTTP URL参数（Query Parameters）与Go对象之间的转换。
+[^6]: 注意此处的`ListOptions`与我们在之前[再识kind](./gvk#再识kind)小节中提及的`DeleteOptions`联系于区别：`DeleteOptions`与`ListOptions`同属于kind第三种类，但是`DeleteOptions`对应的是HTTP请求**体**而不是HTTP URL参数。
+
+      
+

@@ -1,0 +1,93 @@
+/**
+ * Any CSS included here will be global. The classic template
+ * bundles Infima by default. Infima is a CSS framework designed to
+ * work well for content-centric websites.
+ */
+
+/* primary font: Source Han Serif SC */
+@font-face {
+  font-family: "Source Han Serif SC";
+  /*src: local('Source Han Serif CN'), local('Source Han Serif SC'),*/
+  src: url('/static/SourceHanSerifSC-VF.otf.woff2') format('otf');
+}
+
+
+/* fallback font: Noto Serif SC */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@200;300;400;500;600;700;900&display=swap');
+
+
+/* You can override the default Infima variables here. */
+/* Kubernetes color theme */
+:root {
+  --ifm-color-primary: #326ce5;
+  --ifm-color-primary-dark: #1c5bdf;
+  --ifm-color-primary-darker: #1b56d2;
+  --ifm-color-primary-darkest: #1647ad;
+  --ifm-color-primary-light: #4b7ee8;
+  --ifm-color-primary-lighter: #5787ea;
+  --ifm-color-primary-lightest: #7ca1ee;
+  --ifm-font-family-base: 'Source Han Serif SC', 'Noto Serif SC';
+  --ifm-font-size-base: 18px;
+  --ifm-font-weight-base: regular ;
+  --ifm-code-font-size: 80%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --ifm-code-border-radius: 5px;
+}
+
+h1 {
+  font-size: 1.5rem !important;
+}
+
+h2 {
+  font-size: 1.3rem !important;
+}
+
+h3 {
+  font-size: 1.2rem !important;
+}
+
+/* making inline code no border seems better. Also make the background color more deeper when border has gone. */
+code {
+  border: 0;
+  background-color: rgb(242, 244, 244);
+}
+
+.menu {
+  font-size: 17px;
+}
+
+.footnotes {
+  font-size: 16px;
+}
+.footnotes blockquote{
+  font-size: 15px;
+}
+/* inline code */
+/*
+p code {
+  background-color: #00A40026;
+}
+ */
+
+.hero {
+  background-color: rgb(8,40,177);
+  background-image: url("/static/img/logo.png");
+  background-position: bottom;
+  background-repeat: no-repeat;
+  height: 80vh;
+}
+
+/* For readability concerns, you should choose a lighter palette in dark mode. */
+[data-theme='dark'] {
+  --ifm-color-primary: #25c2a0;
+  --ifm-color-primary-dark: #21af90;
+  --ifm-color-primary-darker: #1fa588;
+  --ifm-color-primary-darkest: #1a8870;
+  --ifm-color-primary-light: #29d5b0;
+  --ifm-color-primary-lighter: #32d8b4;
+  --ifm-color-primary-lightest: #4fddbf;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+
+

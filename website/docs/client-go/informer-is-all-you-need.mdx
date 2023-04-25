@@ -1,0 +1,166 @@
+---
+sidebar_position: 3
+---
+
+import DeltaFIFOPNG from '@site/static/img/deltafifo.png';
+import IndexerPNG from '@site/static/img/indexer.png';
+import DeltaPNG from '@site/static/img/delta.png';
+import ReflectorPNG from '@site/static/img/reflector.png';
+import ControllerPNG from '@site/static/img/controller.png';
+import InformerPNG from '@site/static/img/informer.png';
+
+
+# informer is all you need
+
+在前面[controller](./controller)章节中，我们以优化控制器为线索正式引入了`client-go`中的`Informer`组件。
+`Informer`本质上是一种本地资源缓存机制，旨在与集群的etcd同步。因此，它被定义在`k8s.io/client-go/tools/cache`包中。
+
+:::note
+在本节中，我们并不准备带读者进行informer的代码走读。
+同之前[序列化器与序列化器工厂](../apimachinery/serializer)章节一样，我们在这里也并不追求informer实现上的细节，它为了可靠和高效在实现上远比我们想象的复杂。
+本节介绍的informer工作机制仅用于理解最后我们实现的自定义控制器代码。
+:::
+
+在正式介绍informer之前，按照惯例，我们会先从介绍构成informer的组件开始讲起。
+
+## Reflector组件
+
+Reflector由两个**缓存**组件`DeltaFIFO`以及`Indexer`组成。
+
+其中，`DeltaFIFO`的"Delta"可以理解为"变更"，它保存被监听资源的每一个变更事件（例如`Added`，`Updated`，`Deleted`）。"FIFO" 表示它是一个先入先出队列。队列顺序的粒度是资源，而非事件。每个资源对应一个保存本资源变更事件的切片（`[]Delta`）。
+当监听到某资源的变更事件，如果该资源已经在队列中了，那么这个变更事件只会追加到该资源对应的变更事件切片中，而并不会影响该资源本身在队列中的顺序。
+
+<img src={DeltaFIFOPNG} style= {{width: "80%"}}/>
+
+其中，`DeltaFIFO`中的基本单元"变更"`Delta`的定义为：
+```go title="k8s.io/client-go/tools/cache/delta_fifo.go"
+type Delta struct {
+	Type   DeltaType
+	Object interface{}
+}
+```
+它包括具体的变更类型（`Added`，`Updated`，`Deleted`）以及变更后的资源对象本身。
+
+<img src={DeltaPNG}  style= {{width: "50%"}}/>
+
+
+`Indexer`则可以理解成本地资源缓存的*索引器*，它侧重于对本地缓存资源的索引能力。
+具体来说，我们可以在索引器中定义一个名为"`namespace`"的索引项，它可以以namespace为单位，检索各个namespace下所有本地缓存资源。
+
+
+<img src={IndexerPNG} style= {{width: "100%"}}/>
+
+`Reflector`组件通过`Run()`方法开启运转，`Run()`函数里启动执行的`ListAndWatch()`方法**持续**通过Kubernetes API监听资源变更事件并将变更事件加入到`DeltaFIFO`缓存中：
+```go title="k8s.io/client-go/tools/cache/reflector.go"
+func (r *Reflector) Run(stopCh <-chan struct{}) {
+	wait.BackoffUntil(func() {
+		if err := r.ListAndWatch(stopCh); err != nil {
+			r.watchErrorHandler(r, err)
+		}
+	}, r.backoffManager, true, stopCh)
+}
+```
+其中`ListAndWatch()`方法在创建`Reflector`组件时作为参数传入，它需要调用`List()`和`Watch()`两个函数，`List()`在启动`Reflector`组件时先一次性向Kubernetes API获取某一资源类型的所有资源集合，之后则通过`Watch()`函数持续通过Kubernetes API监听资源的变更事件[^1]。
+
+需要注意的是，`Reflector`组件通过`Run()`函数启动之后，仅有`DeltaFIFO`缓存开始不断加入变更事件，
+但是另一个`Indexer`资源缓存组件并没有实际开始保存任何资源对象它——它仍然是一个空的缓存。`Indexer`缓存仍然需要额外手动往其中添加资源。
+
+<img src={ReflectorPNG} style= {{height: "280px"}}/>
+
+## Controller组件
+
+注意本小节的`Controller`并不是我们上一节所说的*Kubernetes控制器*概念，本节的`Controller`仅是`client-go`中的一个数据结构，也是构成`Informer`的直接组件。
+`Controller`内含有一个`Reflector`组件，`Controller`组件通过`Run()`方法开启运转，`Run()`函数里启动执行的`processLoop()`函数负责持续驱动组件运转。
+```go title="k8s.io/client-go/tools/cache/controller.go"
+func (c *controller) Run(stopCh <-chan struct{}) {
+   // ...
+	wait.Until(c.processLoop, time.Second, stopCh)
+	wg.Wait()
+}
+```
+在驱动`Controller`组件运转的`processLoop()`函数中：
+```go
+func (c *controller) processLoop() {
+	for {
+		obj, err := c.config.Queue.Pop(PopProcessFunc(c.config.Process))
+		if err != nil {
+			if err == ErrFIFOClosed {
+				return
+			}
+			if c.config.RetryOnError {
+				// This is the safe way to re-enqueue.
+				c.config.Queue.AddIfNotPresent(obj)
+			}
+		}
+	}
+}
+```
+它会不断从`Reflector`子组件的`DeltaFIFO`队列中pop出一项（即某资源对应的所有变更），同时
+1. 针对不同的变更事件，**触发**对应的"钩子函数"`OnUpdate()`，`OnUpdate()`，`OnDelete()`。这些"钩子函数"是在创建`Controller`组件时传入。
+   它们的作用其实可以认为是对外提供的资源变更事件的通知及处理机制；
+2. 将该资源**最新版本**放入`Reflector`子组件的`Indexer`缓存中（也因此，`Indexer`缓存中存放的永远是该资源的最新版本）。
+
+<img src={ControllerPNG} style={{height: "460px"}}/>
+
+至此，我们发现`Controller`组件似乎已经完全契合我们之前[从Kubernetes watch机制到Informer](./controller#从kubernetes-watch机制到informer)小节中对Kubernetes控制器的两个要求。
+
+那么我们所说的`Informer`组件又是什么呢？
+
+
+## Informer
+
+`Informer`包含了一个`Controller`组件。除去`Controller`本身，`Informer`本身并不含有任何实质性的组件或者驱动组件运行的模块。
+
+
+
+`Informer`的作用像是一个专门给调用者封装的简单易用的交互”壳”，它负责：
+
+1. 传入`Controller`组件需要的"钩子函数"——在代码中为被称为`ResourceEventHandlerFuncs`，以及（`Controller`中）`Reflector`组件的`ListWatch()`函数；
+2. 初始化`Controller`组件；
+3. 并且向调用者返回
+    1.  `Controller`组件的引用以便调用者可以控制它的启停;
+    2. （`Controller`中）`Reflector`组件的`Indexer`缓存的引用以便调用者可以直接检索资源。
+
+
+
+<img src={InformerPNG} style={{height: "620px"}}/>
+
+## 小结
+
+:::tip
+我们从构成`Informer`的基本组件说起，最终描绘了`Informer`的整体结构。
+
+简单来说，你可以把`Informer`理解成一个由某一资源类型的`List()`和`Watch()`函数驱动的本地资源缓存，同时它也提供了针对资源变更事件的通知及处理机制；
+
+另外，值得一提的是不同于其他技术博客，我们并没有介绍`workqueue`。
+根据`Informer`的源码，它本身运行并不需要`workqueue`组件。`client-go`中提供的`workqueue`仅仅是一种**增强**。
+它可以被使用在本节叙述的"钩子函数"中，相比于在"钩子函数"里**直接**处理各个事件，
+我们可以在各个"钩子函数"里把事件先暂时放入到`workqueue`中，我们再另外另统一从`workqueue`中"捞取"并处理这些事件。
+`client-go`中已经为我们提供了通用队列、限速队列、延时队列等，我们可以借助这些官方开发者实现高效且可靠安全的队列来帮助我们编写高质量的程序。
+由于本书最后实现的控制器极为精简，并没有再利用`workqueue`增强，为了降低读者阅读的负担，我们也不再赘述`workqueue`组件。
+:::
+
+[^1]: 正文中为了减轻读者阅读负担和叙述的连贯性，忽略了一些细节：
+
+      其中`ListAndWatch()`方法里会使用到listerWatcher`成员变量，这个成员变量的类型是：
+
+      ```go title="k8s.io/client-go/tools/cache/listwatch.go"
+      type ListWatch struct {
+      	ListFunc  ListFunc
+      	WatchFunc WatchFunc
+      	// DisableChunking requests no chunking for this list watcher.
+      	DisableChunking bool
+      }
+      ```
+      它包含两个函数：`ListFunc`是向Kubernetes API获取某一资源类型资源集合的请求函数；`WatchFunc`是向Kubernetes API监某一资源类型变更事件的请求函数。
+      这两个函数在创建`Reflector`时通过参数传入：
+      ```go
+      r := NewReflector(
+      // ...
+      listerWatcher: &ListWatch{ListFunc: ..., WatchFunc: ...}
+      // other parameters are ignored.
+      )
+      ```
+      `Reflector`的`ListAndWatch()`方法则通过`r.listerWatcher.List()`以及`r.listerWatcher.Watch()`来触发调用传入的请求函数。
+
+
