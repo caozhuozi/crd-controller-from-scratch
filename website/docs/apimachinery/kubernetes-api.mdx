@@ -52,7 +52,7 @@ type CronJob struct {
 另外，所有Kubernetes原生的*kind*被定义在`k8s.io/api`库中。
 
 
-## Kubernetes资源（resource）
+## Kubernetes资源（Kubernetes resource）
 *kind*作为Go类型，Kubernetes可以在内存中创建它们的具体实例（instance），这些实例可以通过序列化以字节的形式或在网络中传输或写入磁盘中（etcd）。
 简而言之，资源类型的具体实例被称作*资源（resource）*[^8]。
 
@@ -69,14 +69,25 @@ type CronJob struct {
 其实*Kubernetes资源*的概念其实与*HTTP资源*的概念非常类似。在HTTP上下文环境中，*资源*是指：
 > The target of an HTTP request is called a "resource", whose nature isn't defined further; it can be a document, a photo, or anything else. Each resource is identified by a Uniform Resource Identifier (URI) used throughout HTTP for identifying resources.
 
-HTTP请求的**目标**即为*资源*，资源的性质则没有进一步的规范，它可以是一个文档，一张照片或者是其他任何东西。每个资源都由一个URI标识。
+翻译过来就是：HTTP请求的**目标**即为*资源*，资源的性质则没有进一步的规范，它可以是一个文档，一张照片或者是其他任何东西。每个资源都由一个URI标识。
 
 在Kubernetes中，如果我们放弃一些严谨性，也可以这样**笼统地**定义*资源*：向Kubernetes API请求的**目标**即为*Kubernetes资源*，它代表的可以是集群中具体存在的实体（如`pod`）或者其他*非实体*（关于*非实体*请参考下面[Kubernetes对象](#Kubernetes对象（Kubernetes-Object）)小节）。
 另外，我们在文档[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)确实找到关于资源的另一种描述：
 > **Resource** a representation of a system entity, sent or retrieved as JSON via HTTP to the server.
 
 这个描述其实已经非常接近于*HTTP资源*的概念了。
-当然它和另一种定义本质上并不冲突——集群中的一个物理实体（或非实体）既可以在内存中以Go对象（实例）的形式存在，也可以以字节序列的形式在网络中通过HTTP协议传输或者存于磁盘中，它们其实是等价的。
+当然它和另一种定义本质上并不冲突——集群中的一个物理实体（或非实体）既可以在Kubernetes系统的内存中以Go对象（实例）的形式存在，也可以以字节序列的形式在网络中通过HTTP协议传输或者存于磁盘中，它们其实是等价的。
+
+:::tip
+假如我们先有了关于*Kubernetes资源*的认知，我们可以基于它反过来去理解[*资源类型*](#资源类型resource-type)和
+[API分组和版本化](#api分组group和版本化version)。
+
+* *资源类型*可以理解成*Kubernetes资源*种类的名称，它们为小写和复数形式，并且它们也会作为REST API中的一个标识用来检索集群中对应的资源。
+* API的分组和版本本质上则是对*Kubernetes资源*的分类和版本化。
+
+这种介绍顺序似乎稍微顺畅一些，不过，这需要你事先对*Kubernetes资源*本身有所了解。
+:::
+
 
 ## Kubernetes对象（Kubernetes Object）
 在绝大多数情况下[^10]，一个*资源（resource）*对应一个*Kubernetes对象（Kubernetes Object）*。
