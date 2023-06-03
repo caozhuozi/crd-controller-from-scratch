@@ -11,14 +11,13 @@ import Kind3PNG from '@site/static/img/kind3.png';
 
 ## GVR
 
-通常，对于一个Kubernetes API URL，我们可以从中提取出它的group，version，以及resource type信息，例如：
+通常，对于一个Kubernetes API URL，我们可以从中提取出它的API分组（group），版本（version），以及资源类型（resource type）信息，例如：
 <GVRSVG style={{height: "120px"}}/>
 
+换个角度来说，我们也可以认为**资源类型依属于API分组和版本而存在**——想要唯一确定一种资源类型，我们还需要API分组和版本信息（为了叙述上的方便，在后续章节中，我们将简称**GV**）。
+由group，version，以及resource type这三个**字符串**组成的三元组被称为*GroupVersionResource*，简称*GVR*[^1]。
 
-我们也可以认为**资源类型依属于API分组和版本而存在**。
-由group，version，以及resource type这三个信息（字符串）组成的三元组被称为*GroupVersionResource*，简称*GVR*[^1]。
-
-实际上*GVR*的概念来源于`apimachinery`库中一个简单的结构体：
+实际上*GVR*的概念来源于`apimachinery`库中一个简单却又基础的结构体，它被定义在`runtime`包的`schema`下：
 ```go title="k8s.io/apimachinery/runtime/schema/group_version.go"
 type GroupVersionResource struct {
 	Group    string
@@ -29,11 +28,11 @@ type GroupVersionResource struct {
 我们其实甚至可以这样理解，先有了源码定义的结构体，再衍生出了相关术语和概念。[🌧️️](../intro#约定)
 
 ## GVK
-在之前的小结中，我们介绍了每种资源类型都对应一个Go类型——*kind*，而资源类型又依属于API分组和版本而存在。相应地，kind也有分组和版本的概念。
-资源类型是Kubernetes API URL中特定位置的一个标识，不同于分组和版本在URL上的表现形式，在Kubernetes源码中（`k8s.io/api`），
-kind的不同版本（或分组）被定义在不同的目录（包）下以作区分。
+在之前的小结中，我们介绍了每种资源类型都对应一个Go类型——*kind*。而每种资源类型其实又依属于API分组和版本而存在，相应地，kind也会有分组和版本的概念。
+我们知道资源类型是Kubernetes API URL中特定位置的一个标识，不同于GV在URL上的表现形式，在Kubernetes源码中（`k8s.io/api`），
+kind的不同版本及分组则被定义在不同的目录（包）下以作区分。
 例如，`horizontalpodautoscaler`在Kubernetes系统中同时存在多个版本，`v1`，`v2`等[^2]。
-`HorizontalPodAutoscaler`类型则分别定义在`k8s.io/api`库的`autoscaling/`包中的子包`v1`，`v2`中。
+`HorizontalPodAutoscaler`类型则分别定义在`k8s.io/api`库的`autoscaling`包中的子包`v1`，`v2`中。
 ```text title="k8s.io/api"
 autoscaling/
 |-- v1
@@ -45,8 +44,8 @@ autoscaling/
 `-- v2beta2
     `-- types.go
 ```
-与*GroupVersionResource*概念类似，kind也有一个与之对应的概念*GroupVersionKind*。
-在Kubernetes中，由Go类型**本身的名称**和此类型对应的Group，Version三个字符串组成的三元组被成为*GroupVersionKind*，简称*GVK*。
+与*GroupVersionResource*类似，kind也有一个与之对应的结构体*GroupVersionKind*。
+在Kubernetes中，由Go类型**本身的名称**和此类型所在的分组和版本三个字符串组成的三元组被成为*GroupVersionKind*，简称*GVK*。
 它在`apimachinery`库中对应的数据结构为：
 ```Go title="k8s.io/apimachinery/runtime/schema/group_version.go"
 type GroupVersionKind struct {
@@ -56,14 +55,13 @@ type GroupVersionKind struct {
 }
 ```
 
-例如，`Job`类的名字为`Job`，由`Job`，`batch`（分组），`v1`（版本） 三个**字符串**组成的三元组即为*GVK*。
+例如，`Job`类型的名字为`Job`，由`Job`，`batch`（API分组），`v1`（版本）三个**字符串**组成的三元组即为*GVK*。
+与资源类型一样，**想要唯一确定一种kind，我们还需要GV的信息**。
 
-我们可以通过`kubectl api-resources`命令查看集群中的：
-
-[comment]: # (TODO: 这里需要解释为什么会同时存在两个类似的概念？它们的区别是什么？)
+[comment]: # (我们可以通过`kubectl api-resources`命令查看集群中的)
 
 ## 再识kind
-在之前的章节中，我们从*资源类型（resource type）*的角度引入了kind，其实kind的概念却要更广。
+在之前[初识kind](./kubernetes-api#初识kind)小节，我们从*资源类型（resource type）*的角度引入了kind，其实kind的概念却要更广。
 在Kubernetes系统中，**任何需要被序列化/反序列化（以用于在网络中传输或者落盘）的Go类型都被称为*kind***[^3]。
 
 例如，根据[Kubernetes API Reference Doc <KubernetesSVG />](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#job-v1-batch)，我们可以通过如下RESTful请求：
@@ -136,9 +134,9 @@ type JobList struct {
 	Items []Job
 }
 ```
-显然这个类型并不**直接**对应任何*资源类型*，它表示的是`jobs`资源的**集合**，其中`Items`字段正是`Job`类型的切片。
+显然这个类型并不**直接**对应任何*资源类型*，它表示的是`jobs`资源的**集合**，其中`Items`字段正是`Job`类型的切片，以用于放置`job`集合。
 
-再比如，当我们想要删除一个job资源的时候，根据文档，我们可以通过如下RESTful请求：
+再比如，当我们想要删除一个job资源的时候，根据[Kubernetes API Reference Doc <KubernetesSVG />](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#job-v1-batch)，我们可以通过如下RESTful请求：
 ```
 DELETE /apis/batch/v1/namespaces/{namespace}/jobs/{name}
 ```
@@ -159,7 +157,7 @@ DELETE /apis/batch/v1/namespaces/{namespace}/jobs/{name}
   ]
 }
 ```
-该请求体对应的Go类型为`DeleteOptions`：
+该请求体在被`kube-apiserver`接受并**解码后**对应的Go类型为`DeleteOptions`：
 ```go title=“k8s.io/apimachinery/pkg/apis/meta/v1/types.go”
 type DeleteOptions struct {
 	TypeMeta
@@ -175,7 +173,7 @@ type DeleteOptions struct {
 	DryRun []string
 }
 ```
-该请求对应的一个返回样例为：
+该请求对应的一个返回体样例为：
 ```json
 {
   "kind": "Status",
@@ -236,10 +234,10 @@ $ curl -v -k -H "Authorization: Bearer WhCDvq4VPpYhrcfmF6ei7V9qlbqTubUc" https:/
   "code": 404
 }
 ```
-显然`DeleteOptions`和`Status`都不对应任何*Kubernetes资源类型*。
+显然，上述的例子中`DeleteOptions`和`Status`都不对应任何*Kubernetes资源类型*。
 
-这些特殊的kind有些例如`DeleteOptions`被放置在“meta.k8s.io”这个特殊的分组中（也就是它对应的GVK信息中中Group字段为“meta.k8s.io”），它的版本则被置为`v1`。
-有的（例如`Status`）可以被认为所属于*历史遗留组（legacy group）*，它对应的GVK信息中Group用一个空字符串表示，它的版本则被置为`v1`。
+这些特殊的kind有些例如`DeleteOptions`被放置在“meta.k8s.io”这个特殊的分组中（也就是它对应的GVK信息中Group字段为“meta.k8s.io”），它的版本则被置为`v1`。
+有的（例如`Status`）可以被认为属于*历史遗留组（legacy group）*，因此它对应的GV中分组用一个**空字符串**表示，它的版本则为`v1`。
 
 基于[Kubernetes API Reference Doc <KubernetesSVG />](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/)，我们可以将kind总结为三类：
 * *Kubernetes资源类型*对应的Go类型：如`Pod`，`Job`。（在后续章节中，我们会简称此类型为*单体类型*）
@@ -256,12 +254,15 @@ $ curl -v -k -H "Authorization: Bearer WhCDvq4VPpYhrcfmF6ei7V9qlbqTubUc" https:/
 ## 小结
 
 :::tip
-本小节中我们从*GVR*引入了*GVK*，意在指出：*kind*和*资源类型*一样必须依赖于API分组及版本而存在。
+本小节中我们从*GVR*引入了*GVK*，意在指出：*kind*和*资源类型*一样必须依赖于API分组及版本（GV）而存在。
 
 同时我们又从序列化/反序列化的角度进一步扩充了Kubernetes *kind*的概念并且根据[Kubernetes API Reference Doc <KubernetesSVG />](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#job-v1-batch)总结了
-kind的三种类型。其中第三个种类比较特殊，类型之间并没有共同的规范或者约定。但需要注意的是，**它们仍要依赖于API分组及版本而存在**。这些知识在后续章节中有重要应用。
+kind的三种类型。其中第三个种类比较特殊，类型之间并没有共同的规范或者约定。但需要注意的是，**它们仍要依赖于API分组及版本（GV）而存在**。这些知识在后续章节中有重要应用。
 
 另外，对于kind前两个种类，它们在源码实现上还需要遵循具体的约定，在后续[kind的三类](./runtime.Object#kind的三类)小节我们还会继续介绍它们。
+
+最后需要说明的是，我们特意把kind概念的扩充放在讨论GVK的章节——意在强调即便是对于需要参与编解码的特殊通用类型（kind第三种类），它们也有所属的GV。
+可见*GVK*是Kubernetes中极为重要及基础的概念。
 :::
 
 

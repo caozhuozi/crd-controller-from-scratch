@@ -1,7 +1,7 @@
 ---
 sidebar_position: 4
 ---
-
+import GithubSVG from '@site/static/img/github-mark.svg';
 import SerializerBasicSVG from '@site/static/img/serializer-basic.svg';
 import SerializerAdvanceSVG from '@site/static/img/serializer-advance.svg';
 
@@ -80,10 +80,23 @@ type Decoder interface {
 
 而在`apimachinery`库中约定的`Decode()`方法中，除了原始字节序列数据`data`这个参数以外，还需要`defaults`以及`into`两个参数。解码方法这样设计的原因是提供了更多的灵活性。
 官方开发者希望解码器能够：
-1. 通过原始字节序列（`data`）包含的gvk信息以及调用者提供的GVK信息（`defaults`）共同推断出一个可能的gvk[^2]；
-2. 如果调用者已经预先提供了解码后的目标对象（`into`），解码器应该尽量使用调用者提供的而避免在内存中再分配一个新对象[^3]。
+1. 通过原始字节序列（`data`）包含的gvk信息以及调用者提供的gvk信息（`defaults`）共同推断出一个可能的gvk[^2]；
+2. 如果调用者已经预先提供了解码后的目标对象"载体"（`into`），解码器应该尽量使用调用者提供的载体而避免在内存中再分配一个新对象[^3]。
 
-接下来我们用图示的方式给出JSON序列化器的解码流程。
+接下来我们会**大致**[^4]叙述一下JSON序列化器的解码流程。
+正如前文所述，由于`apimachinery`库中约定的`Decode()`方法需要额外提供一些灵活性，导致最终解码后得到的Go对象可能是一个推断出的gvk。
+JSON序列化器在实现上也并不例外。
+在JSON序列化器的解码方法中，推断gvk的具体顺序为：
+`originalData > default gvk > into`，也就是原始字节数据包含的gvk信息优先于调用者给定的gvk信息（参数`defaults`）优先于参数中事先提供的对象载体（参数`into`）。
+
+1. 首先通过`meta.Interpret()`方法尝试从原始字节数据中得到gvk信息，我们称此gvk信息为*实际gvk*；
+2. 接下来通过`gvkWithDefaults()`函数将*实际gvk*结合提供的*默认gvk*（参数`defaults`）再推断出一个gvk，我们称此gvk信息为*推断gvk*；
+3. 如果*推断gvk*与提供的目标对象载体（参数`into`) 的gvk仍然不匹配，那么在`runtime.UseOrCreateObject()`函数中创建一个**新的**与*推断gvk*匹配的对象载体，之后将原始字节数据反序列化到此新载体上并返回此新载体；
+   否则，直接将原始字节数据反序列化到调用者提供的目标载体（参数`into`)中并返回此目标载体。
+
+
+
+
 
 <SerializerBasicSVG style={{"width": "95%"}}/>
 
@@ -105,7 +118,7 @@ type CodecFactory struct {
 }
 ```
 
-`CodecFactory`实现了`NegotiatedSerializer`[^4]这个核心接口:
+`CodecFactory`实现了`NegotiatedSerializer`[^5]这个核心接口:
 ```go title="k8s.io/apimachinery/pkg/runtime/interfaces.go"
 type NegotiatedSerializer interface {
 	SupportedMediaTypes() []SerializerInfo
@@ -126,8 +139,8 @@ type NegotiatedSerializer interface {
 
 
 ## ParameterCodec
-上述的`CodecFactory`主要用于HTTP**请求/返回体**以及**写入/读取**etcd的编解/码。在Kubernetes中，还需要一种特殊的"编解码器"[^5]，它的作用是负责HTTP URL参数（Query Parameters）与Go对象之间的转换。
-例如，Go对象`metav1.ListOptions{Limit: 1, LabelSelector: "app=foo"}`[^6]将会解码成URL参数`limit=1&app%3D=foo`。
+上述的`CodecFactory`主要用于HTTP**请求/返回体**以及**写入/读取**etcd的编解/码。在Kubernetes中，还需要一种特殊的"编解码器"[^6]，它的作用是负责HTTP URL参数（Query Parameters）与Go对象之间的转换。
+例如，Go对象`metav1.ListOptions{Limit: 1, LabelSelector: "app=foo"}`[^7]将会解码成URL参数`limit=1&app%3D=foo`。
 另外，值得注意的是，`ParameterCodec`编解码器仍然依赖于`Scheme`注册机制工作。也就是说，`ListOptions`类型也同样需要事先注册进`scheme`中。
 
 ## 小结
@@ -141,7 +154,7 @@ type NegotiatedSerializer interface {
       当然，这种灵活性也带来了实现上的不方便。尤其是原始数据包含的实际gvk信息和调用者提供的gvk信息以及`into`的gvk不一致的情况。
       因此在编码器接口的实现中（例如JSON序列化器），有相当一部分逻辑在处理这种情形。
 [^3]: 资源不同版本的转化是Kubernetes**服务端**处理资源请求的重要部分，通过将资源转化成一个内部版本(internal/hub version)以便对不同版本的资源**统一进行相关逻辑的处理**。
-      我们在这里仅给出一个Kubernetes服务端资源版本转换发生的一般流程（改编自社区文档[API Changes](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api_changes.md#operational-overview)）：
+      我们在这里仅给出一个Kubernetes服务端资源版本转换发生的一般流程（改编自文档[API Changes <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api_changes.md#operational-overview)）：
         1. A user POSTs a Pod object to /api/v7beta1/...
         2. The JSON is unmarshalled into a v7beta1.Pod structure
         3. Default values are applied to the v7beta1.Pod
@@ -150,11 +163,11 @@ type NegotiatedSerializer interface {
         6. The hub.Pod is converted to a v6.Pod (because v6 is the latest stable version)
         7. The v6.Pod is marshalled into JSON and written to etcd
 
-      相关内容不在本书讨论范围之内，请参考参考[Kubernetes API请求的生命周期](../intro#扩展阅读)，以及kubebuider对于[hub version](https://book.kubebuilder.io/multiversion-tutorial/conversion-concepts.html)概念的介绍
+      相关内容不在本书讨论范围之内，请参考[Kubernetes API请求的生命周期](../intro#扩展阅读)，以及[Kubernetes资源的版本转化](../intro#扩展阅读)
       `apimachinery`库中实现了一个带有资源版本转换功能的编解码器`codec`(`k8s.io/apimachinery/pkg/runtime/serializer/versioning`)，对于编/解码功能，它仍然基于的是基础序列化器。
-      由于所有资源类型的Kubernets API URL中都有分组和版本信息，client端发送的请求和接受到的返回中的资源分组及版本都是确定的，因此在client端的序列化器没有版本转换的需求。
-
-[^4]: 官方开发者用*Negotiated(协商)*命名此核心接口是因为这个序列化器通常在被用于Server端时可以执行*[HTTP内容协商（HTTP Content negotiation）](https://developer.mozilla.org/en-US/docs/Web/HTTP/Content_negotiation)*。
+      由于所有资源类型的Kubernets API URL中都有分组和版本信息，对于client端发送的请求和接受到的返回中的资源分组及版本都是确定的，因此在client端的序列化器没有版本转换的需求。
+[^4]: JSON序列化器是`apimachinery`中最为基础的序列化组件之一，官方开发者为了保证它的可靠性因此考虑到的情况也比较多。我们在这里会放弃一些严谨性，仅抽取一些关键步骤来大概说明。
+[^5]: 官方开发者用*Negotiated(协商)*命名此核心接口是因为这个序列化器通常在被用于Server端时可以执行*[HTTP内容协商（HTTP Content negotiation）](https://developer.mozilla.org/en-US/docs/Web/HTTP/Content_negotiation)*。
       *HTTP内容协商*是指在返回资源请求时如何选择特定的数据表示形式（尤其是客户端在请求资源时没有通过HTTP的`Accept`头明确指定接受格式时）。这使得上层封装的序列化器需要支持/集成多种数据类型的编/解码器。
       
       除此以外，在kubernetes Server端组件，例如`apiserver`中，需要将对资源的不同版本的请求通通转换为一个内部版本（`APIInternalVersion`或者也被称作`HubVersion`）以便对不同版本的资源**统一进行相关逻辑的处理**。这种资源版本在server端的转化也可以理解成一种server**内部**对资源版本的协商。[🌧️](../intro#约定)
@@ -164,9 +177,9 @@ type NegotiatedSerializer interface {
       
       意思是说"我们应该将可以协商（资源）版本的序列化器与可以协商序列化格式的序列化器分开"。在官方开发者看来，资源版本的内部转换也可以称之为*协商*。[🌧️](../intro#约定)
       
-      因此，`NegotiatedSerializer`中所谓的*协商*可视为两个层次: i) 数据格式 ii)  资源版本转换
-[^5]: 通常我们所说的*序列化器*或者*编解码器*是指字节序列与Go对象之间的转化，此处的"编解码器"并不能归为此类，它的作用是HTTP URL参数（Query Parameters）与Go对象之间的转换。
-[^6]: 注意此处的`ListOptions`与我们在之前[再识kind](./gvk#再识kind)小节中提及的`DeleteOptions`联系于区别：`DeleteOptions`与`ListOptions`同属于kind第三种类，但是`DeleteOptions`对应的是HTTP请求**体**而不是HTTP URL参数。
+      因此，`NegotiatedSerializer`中所谓的*协商*可视为两个层次: i) 数据格式 ii)  资源内部版本转换
+[^6]: 通常我们所说的*序列化器*或者*编解码器*是指字节序列（`[]bytes`）与Go对象之间的转化，此处的"编解码器"并不能归为此类，它的作用是HTTP URL参数（Query Parameters）与Go对象之间的转换。
+[^7]: 注意此处的`ListOptions`与我们在之前[再识kind](./gvk#再识kind)小节中提及的`DeleteOptions`联系于区别：`DeleteOptions`与`ListOptions`同属于kind第三种类，但是`DeleteOptions`对应的是HTTP请求**体**而不是HTTP URL参数。
 
       
 

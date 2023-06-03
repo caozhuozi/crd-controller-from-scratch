@@ -6,6 +6,8 @@ import ClientConfigSVG from '@site/static/img/client-config.svg';
 import ConfigInsidePNG from '@site/static/img/config-inside.png';
 import ConfigOutSidePNG from '@site/static/img/config-outside.png';
 import RequestPNG from '@site/static/img/request.png';
+import ClientRelationPNG from '@site/static/img/client-relation.png';
+import ClientChainPNG from '@site/static/img/client-chain.png';
 
 
 
@@ -24,17 +26,40 @@ type Clientset struct {
 	appsV1beta2                  *appsv1beta2.AppsV1beta2Client
 	// ...
 ```
-根据其中每个客户端的命名，我们可以看出每个客户端的"粒度"并不是具体到资源类型，而仅仅是到API分组及版本（以下简称*GV*）为止。
-在其中的每个客户端实际上是对`client-go`中更为基础的HTTP RESTful客户端组件`RESTClient`的一种封装，例如`appsv1.AppsV1Client`：
+我们可以看到`Clientset`包含了所有内置API分组（及分组版本）[^1]的客户端。
+请注意，根据其中每个客户端的命名，**每个客户端其实的对应的是一个API组，而并不是具体到某一种资源类型**。
+
+我们再稍微深入探究一下每个*API组客户端*的类型，例如`appsv1.AppsV1Client`：
 ```go title="k8s.io/client-go/kubernetes/typed/apps/v1/apps_client.go"
 type AppsV1Client struct {
 	restClient rest.Interface
 }
 ```
-因此，我们有理由猜测`RESTClient`类型本身初始化的"粒度"就是GV。
+其中`rest.Interface`是一个表达HTTP RESTFul动词的通用接口，正如它的定义一样：
+```go title="k8s.io/client-go/rest/client.go"
+type Interface interface {
+	GetRateLimiter() flowcontrol.RateLimiter
+	Verb(verb string) *Request
+	// highlight-next-line
+	Post() *Request
+	// highlight-next-line
+	Put() *Request
+	// highlight-next-line
+	Patch(pt types.PatchType) *Request
+	// highlight-next-line
+	Get() *Request
+	// highlight-next-line
+	Delete() *Request
+	APIVersion() schema.GroupVersion
+}
+```
+在`client-go`中，`RESTClient`是`rest.Interface`接口的标准实现。
+所以，API组客户端实际上是对`client-go`中更为基础的RESTful客户端组件`RESTClient`的一种封装。
 
-事实也是如此。根据源码，在`client-go`中，`rest.Config`[^1]结构被用于配置及初始化`RESTClient`。
-`rest.Config`嵌入了`ContentConfig`结构体，而`ContentConfig`结构中只需要指定API分组及版本信息而无需再细致到资源类型。
+在了解了这个事实之后，我们自然而然地猜测`RESTClient`类型本身初始化的"粒度"可能就是GV。那么事实是否也是这样呢？
+根据`RESTClient`初始化部分的源码：在`client-go`中，`rest.Config`[^1]结构被用于配置及初始化`RESTClient`。
+
+`rest.Config`嵌入了`ContentConfig`结构体，而`ContentConfig`结构中只需要指定API分组及其版本信息而无需再细致到资源类型。
 ```go title="k8s.io/client-go/rest/config.go"
 type Config struct {
   ContentConfig
@@ -52,12 +77,13 @@ type ContentConfig struct {
 <ClientConfigSVG style={{width: "100%"}}/>
 
 :::tip
-我们从`clientset`引入`RESTClient`是为了说明`RESTClient`类型初始化的"粒度"是GV。
+我们从`clientset`的角度切入，介绍了`client-go`中的*API组客户端*，
+再从*API组客户端*引入`client-go`的"真正"的HTTP客户端基础组件`RESTClient`，意在说明`RESTClient`初始化的"粒度"是*GroupVersion*。
 :::
 
 ## RESTClient基本用法
 
-下面我们将通过一个最为简单的例子来介绍如何使用`RESTClient`对象与Kubernetes API交互。
+下面我们将通过一个最为简单的例子来介绍如何使用`RESTClient`类型直接与Kubernetes API交互。
 
 ```go
 package main
@@ -96,11 +122,10 @@ func main() {
 }
 ```
 
-
-这个例子分为两部分：
+直接使用RESTClient类型与Kubernetes API交互主要分为两部分：
 1. 第一部分主要是通过`rest.Config`对象来初始化一个`RESTClient`实例。
-   * `clientcmd.BuildConfigFromFlags()` [^2]用于创建并返回一个`rest.Config`对象，同时将`.kube/config`文件中记录的信息转化为`Config`对象中的`Host`字段以及用于与`kube-apiserver`TLS加密通信的有关字段。
-     <img stc={ConfigOutSidePNG} width="90%" />
+   * `clientcmd.BuildConfigFromFlags()` [^3]用于创建并返回一个`rest.Config`对象，同时将`.kube/config`文件中记录的信息转化为`Config`对象中的`Host`字段以及用于与`kube-apiserver`TLS加密通信的有关字段。
+     <img src={ConfigOutSidePNG} width="90%" />
    * 设置Kubernetes API URL Path的根路径, 通常为`/apis`，但是对于*核心组*这个API分组来说，由于历史原因，它对应的API根路径则是`/api`
    * 设置资源的API分组及版本信息
    * 指定用于HTTP请求与返回体编/解码的序列化器：
@@ -110,25 +135,119 @@ func main() {
 
 2. 第二部分则是调用`RESTClient`相关方法用于实际向Kubernetes API发起请求。
    可以看出，`RESTClient`发送请求的代码基于*建造者模式（builder pattern）*，具体的资源类型，命名空间等是在向Kubernetes API发起请求时指定。
-   其中用于将`metav1.ListOptions`类转化为URL中query parameter也是之前[client-go中的全局url参数序列化器](../apimachinery/client-go-and-apimachinery#client-go中的全局url参数序列化器)章节中提及的全局URL参数序列化器`ParameterCodec`。
-   这些填入的信息（包括根路径，GV，资源类型，命名空间等）将被用于组成最终的请求URL Path（以及URL中的查询参数）[^3]。
+   一个稍微特殊的方法是`VersionedParams()`，它用于将`metav1.ListOptions`对象"解码"为HTTP URL中查询参数（query parameter），它的第二个参数用于指定解码器，而这个解码器正是之前[client-go中的全局url参数序列化器](../apimachinery/client-go-and-apimachinery#client-go中的全局url参数序列化器)章节中提及的全局URL参数序列化器`ParameterCodec`。
+   这些填入的信息（包括根路径，GroupVersion，资源类型，命名空间等）最终将被用于组成HTTP请求的URL（以及URL中的查询参数）[^4]。
 
+### Request类型与Result类型
+我们有必要在这里稍微提及一个可能被忽略的细节。
+在上述的例子中，我们知道`RESTClient`基于*建造者模式*。其实更准确的说法是基于建造者模式的是`client-go`中的`Request`类型而非`RESTClient`。这又是什么意思呢？
+我们可以再回过头来具体看看`RESTClient`的接口`rest.Interface`，可以发现`RESTClient`的`Post()`，`Get()`，`Delete()`等方法其实返回是`Request`类型（指针），而不是自身。
+上述例子中的`Namespace()`，`Resource()`，`Name()`，`VersionedParams()`，`Do()`，`Into()`等方法其实是`Request`类型的方法，并且这些方法返回的是
+
+
+
+
+
+## 资源客户端
+其实除了*API组客户端*外，`client-go`中也为每个资源类型封装了一个客户端，例如为pods封装的客户端：
+```go title="k8s.io/client-go/kubernetes/typed/core/v1/pod.go"
+type pods struct {
+	client rest.Interface
+	ns     string
+}
+```
+可以看出，pods客户端也是对基础组件`RESTClient`的封装，而且相比于API组客户端，多了一个有关命名空间的（namespace）的成员变量。
+另外，通过它对应的接口:
+```go "k8s.io/client-go/kubernetes/typed/core/v1/pod.go"
+type PodInterface interface {
+    // highlight-next-line
+	Create(ctx context.Context, pod *v1.Pod, opts metav1.CreateOptions) (*v1.Pod, error)
+	// highlight-next-line
+	Update(ctx context.Context, pod *v1.Pod, opts metav1.UpdateOptions) (*v1.Pod, error)
+	UpdateStatus(ctx context.Context, pod *v1.Pod, opts metav1.UpdateOptions) (*v1.Pod, error)
+	// highlight-next-line
+	Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error
+	// highlight-next-line
+	Get(ctx context.Context, name string, opts metav1.GetOptions) (*v1.Pod, error)
+	// highlight-next-line
+	List(ctx context.Context, opts metav1.ListOptions) (*v1.PodList, error)
+	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *v1.Pod, err error)
+	// ...
+}
+```
+我们可以看出*资源客户端*为某一资源类型的增删改查都封装了相应的方法。并且在实现上，封装的各个方法中其实都直接使用了`RESTClient`来与`kube-apiserver`交互，例如pods资源客户端的`Get()`方法：
+```go title="k8s.io/client-go/kubernetes/typed/core/v1/pod.go"
+func (c *pods) Get(ctx context.Context, name string, options metav1.GetOptions) (result *v1.Pod, err error) {
+	result = &v1.Pod{}
+	err = c.client.Get().
+		Namespace(c.ns).
+		Resource("pods").
+		Name(name).
+		VersionedParams(&options, scheme.ParameterCodec).
+		Do(ctx).
+		Into(result)
+	return
+}
+```
+
+:::note
+除了增删改查以外，其中资源客户端封装的`Watch`和`UpdateStatus`方法也十分重要，我们在后续章节还会介绍。
+在这里，你只需要了解`client-go`为每个资源类型也**单独**封装了一个客户端用于管理相应的资源。
+:::
+
+## client-go中各客户端类型之间的关系
+到现在为止，我们还没有介绍*API组客户端*与*资源客户端*的关系，我们只要稍微探究*API组客户端*的方法就会知道它们之间的关系了——为了阅读上的连贯性，在[Clientset与RESTClient](#Clientset与RESTClient)小节中我们只是介绍了API组客户端类型的结构体，并没有提及它的方法。
+我们还是以`appsv1.AppsV1Client`组客户端为例：
+```go title="k8s.io/client-go/kubernetes/typed/apps/v1/apps_client.go"
+
+type AppsV1Client struct {
+	restClient rest.Interface
+}
+
+func (c *AppsV1Client) DaemonSets(namespace string) DaemonSetInterface {
+	return newDaemonSets(c, namespace)
+}
+
+func (c *AppsV1Client) Deployments(namespace string) DeploymentInterface {
+	return newDeployments(c, namespace)
+}
+
+func (c *AppsV1Client) ReplicaSets(namespace string) ReplicaSetInterface {
+	return newReplicaSets(c, namespace)
+}
+// ...
+```
+它所封装的方法以组内的各资源类型为方法名，以命名空间为参数，并返回各资源客户端。
+
+`Clientset`，API组客户端，资源客户端，`RESTClient`的关系可以被总结成下图所示：
+
+<img src={ClientRelationPNG} width="380px"/>
+
+
+其实，clientset用法中的调用链方式本质上就是封装的不同客户端之间的转化，最终由`RESTClient`类型完成与Kubernetes API的直接交互。
+```go
+clientset.AppsV1().Deployments("default").Get(context.TODO(),  metav1.GetOptions{})
+```
+
+<img src={ClientChainPNG} width="680px"/>
 
 
 ## 小结
 
 :::tip
-我们介绍构成`Clientset`的基础组件`RESTClient`的原因是`Clientset`是Kubernetes**原生**资源的客户端。对于自定义资源，
-我们需要使用更为基础的`RESTClient`直接与Kubernetes API交互来管理自定义资源。
+虽然在本节中我们介绍了`client-go`中的多个客户端类型，但是本节的重点依然是`RESTClient`的使用方法。
+原因是不管是`Clientset`还是*API组客户端*，亦或是*资源客户端*，它们都是为Kubernetes**原生**资源封装的客户端。
+对于自定义资源，我们需要使用更为底层的`RESTClient`直接与Kubernetes API交互来管理它们。
 :::
 
 
 
-
-[^1]: `rest`指`client-go`库中的`rest`包。
-[^2]: 例子中给的是运行在Kubernetes集群外的客户端例子，对于已知要运行在集群中的客户端，需要使用`rest.InClusterConfig()`方法来创建`rest.Config`对象。
+[^1]: 为了叙述上的方便，在接下来我们会把*API组及其版本*简称为API组，*GV*或者*GroupVersion*。
+[^2]: `rest`指`client-go`库中的`rest`包。
+[^3]: 例子中给的是运行在Kubernetes集群外的客户端例子，对于已知要运行在集群中的客户端，需要使用`rest.InClusterConfig()`方法来创建`rest.Config`对象。
       <img src={ConfigInsidePNG} style={{width: "90%"}}/>
-[^3]: 在`client-go`源码中，`RESTClient`对象在发送请求时，其实是将自身转化为`Request`对象。再由`Request`对象执行HTTP请求动作及对返回的解码工作。
+[^4]: 在`client-go`源码中，`RESTClient`对象在发送请求时，其实是将自身转化为`Request`对象。再由`Request`对象执行HTTP请求动作及对返回的解码工作。
       <img src={RequestPNG} style={{width: "100%"}}/>
 
 

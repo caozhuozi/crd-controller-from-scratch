@@ -7,39 +7,184 @@ import ResourceAndObjectPNG from '@site/static/img/resource-and-object.png';
 import ResourceObjectKindPNG from '@site/static/img/resource-object-kind.png';
 import VirtualResourcePNG from '@site/static/img/virtual-resource.png';
 
-# Kubernetes API 基础
-在正式深入`apimachinery`源码之前，我们首先需要介绍与kubernetes API相关的一些重要概念，这会有助于我们对`apimachinery`库的理解。
-
-:::note
-这些术语是本书论述的基础，它们与理解自定义控制器的实现（以及Kubernetes源码）直接相关。
+# 从Kubernetes API谈起
+在正式深入`apimachinery`源码之前，我们首先需要介绍与*Kubernetes API*相关的一些重要术语，这是我们理解`apimachinery`库的前提。
+:::tip
+这些术语是本书论述的基础，它们与理解自定义控制器的实现以及Kubernetes二次开发直接相关。
 同时这些专有名词在概念上非常相似，也请你尽量保持耐心。
 :::
 
+我们所说的*Kubernetes API*是指Kubernetes组件[`kube-apiserver`](https://kubernetes.io/docs/reference/command-line-tools-reference/kube-apiserver/)(Kubernetes API server)暴露的HTTP API。
+Kubernetes API大体上[^1]是基于*资源（Resource）*[^2]的*RESTful*[^3]风格的编程接口，它支持通过标准HTTP动词（POST、PUT、PATCH、DELETE、GET）来检索、创建、更新和删除集群*资源*。
+
+
+:::tip
+根据文档[Declarative application management in Kubernetes <GithubSVG />](https://github.com/kubernetes/design-proposals-archive/blob/main/architecture/declarative-application-management.md#configuration-using-rest-api-resource-specifications)，Kubernetes API Server被设计成系统**唯一**的对外交互接口。
+不管是客户端工具（`kubectl`），UI(`dashboard`)，还是Kubernetes系统内部组件（`kubelet`，内置的*控制器（Controller）*[^4]等）在背后，它们最终仍然指向Kubernetes API。
+:::
+
+## Kubernetes资源
+
+我们介绍的第一个API术语是*Kubernetes资源（Resource）*。
+
+### HTTP与Resource
+
+在介绍*Kubernetes资源*之前，我想首先引入一个与它极为相似的概念——HTTP（或是Web）语境下的*资源*，私以为这有助于我们理解*Kubernetes资源*。
+
+<details>
+<summary>HTTP语境下Resource的定义</summary>
+
+HTTP语境下的*Resource*的概念首次在[RFC 1630](rfc1630)中伴随URI(Uniform Resource Identifier)的概念而引入，关于它的明确说明直到[RFC 3986](rfc3986)中才正式出现，不过仍然以*URI*的角度阐述：
+> [Resource](https://datatracker.ietf.org/doc/html/rfc3986#section-1.1)
+>
+> This specification does not limit the scope of what might be a resource;
+> rather, the term "resource" is used in a general sense for whatever might be identified by a URI.
+
+意思是说，术语*Resource*可以是URI所指代的任何内容；
+
+在[RFC 3986](rfc3986)之前，RESTful风格的提出者Roy T. Fielding在其关于REST的[学位论文](https://www.ics.uci.edu/~fielding/pubs/dissertation/top.htm)也给出了*Resource*的定义：
+> [5.2.1.1 Resources and Resource Identifiers](https://www.ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm#sec_5_2_1_1)
+>
+> The key abstraction of information in REST is a resource.
+> Any information that can be named can be a resource: a document or image, a temporal service (e.g. "today's weather in Los Angeles"), a collection of other resources, a non-virtual object (e.g. a person), and so on.
+
+意思是说，REST风格中的*Resource*是指可以被命名的任何信息：它可以是一个文档，一张图片，（甚至可以是）洛杉矶的当日温度等等；
+
+</details>
+
+
+
+
+总体上来说，不管是[RFCs](https://www.ietf.org/standards/rfcs/)还是[REST的论文](https://www.ics.uci.edu/~fielding/pubs/dissertation/top.htm)中关于*Resource*的说明或者定义是**抽象**的。
+不过，基于上述略显晦涩的说明，网络或者书籍中上也有对HTTP*资源*更为通俗的解释。例如：[MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Identifying_resources_on_the_Web)对*资源*给出的解释：
+
+> The target of an HTTP request is called a "resource", whose nature isn't defined further; it can be a document, a photo, or anything else.
+
+也就是：**HTTP请求的"目标"即为*资源*，它可以是文档、图片或者是其他（存储在服务端的）任何"内容"**。
+:::tip
+这些"内容"也可以是是数据库中的一行数据，也可以是算法的执行结果等[^5]。
+:::
+
+
+
+
+#### HTTP资源的表现形式
+尽管[RFC 3986](rfc3986)或者[MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Identifying_resources_on_the_Web)都强调了*资源*没有任何形式上的限制，但通常，HTTP*资源*应当可以被表示成比特流（字节序列）[^5]。
+服务端可以为资源提供不同的表现格式，例如，使用JSON或者XML（编码后以在网络中以字节流的形式传输）[^5]。 客户端也可以使用HTTP[*内容协商*](https://datatracker.ietf.org/doc/html/rfc2295)来与服务端协商资源的具体表现形式。
+
+### 从HTTP资源到Kubernetes资源——初识Kubernetes资源
+
+在了解了HTTP语境下的资源之后，我们再来认识*Kubernetes资源*。
+
+在文档[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)中，我们可以找到官方社区对*Kubernetes资源*的一种描述：
+> **Resource** a representation of a system entity, sent or retrieved as JSON via HTTP to the server.
+
+意思是说：*Kubernetes资源*代表了集群中的一个"存在物"[^6]，通过HTTP，它以JSON的形式在客户端与Kubernetes API Server间传输。
+
+这个描述其实与*HTTP资源*的概念极为相似。
+只不过对于Kubernetes集群来说，在API URI的另一侧并不是Web语境下的文档，图片等，而是集群中的一个"存在物"——常见的`pods`，`deployments`，`services`等都是*Kubernetes资源*，它们也都有对应的JSON格式在网络中传输。
+
+
+当然，文档[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)对*Kubernetes资源*的描述还是稍显模糊。
+我们能否像[RFCs](https://www.ietf.org/standards/rfcs/)的风格一般对*Kubernetes资源*这个术语作出严格的定义呢？
+幸运的是，在[Kubernetes API Concepts <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/api-concepts/)文档中，官方其实对Kubernetes API相关术语也有更为严谨的描述：
+
+> [Kubernetes API terminology](https://kubernetes.io/docs/reference/using-api/api-concepts/#standard-api-terminology)
+>
+> Kubernetes generally leverages common RESTful terminology to describe the API concepts:
+>
+> * A resource type is the name used in the URL
+> * All resource types have a concrete representation (their object schema) which is called a kind
+> * A single instance of a resource type is called a resource, and also usually represents an object
+
+
+事情似乎看起来并不简单，为了定义*Kubernetes资源*，官方还引入了*Resource Type*和*Kind*的概念。
+本节接下来的内容，便是对上述定义的详细解读。请跟随我一起开始了解这些术语吧。
 
 ## API分组（group）和版本化（version）
-为了便于扩展和迭代API[^1]，Kubernetes对所有API进行分组(API groups)和版本化(version)。
-具体来说，所有Kubernetes API path都带有分组和版本信息，并且它们通常[^2]符合形式：`apis/{group}/{version}/...`。
 
+:::tip 说明
+为了解释清楚*Resource Type*、*Kind*、以及*Resource*这三个术语，我们需要从Kubernetes API URL的结构说起。
+:::
+
+为了便于扩展和迭代API，Kubernetes对所有API进行分组(API groups)和版本化(version)[^7]。
+具体来说，所有Kubernetes API路径都会带上分组和版本信息，它们通常符合形式`apis/{group}/{version}/...`并以此形式作为API的根路径。
+
+例如：API`/apis/batch/v1/...` 的分组是`batch`，版本是`v1`；
+
+需要注意的是，API分组的名称并不局限于一个单词，一个常见到的命名模式是（伪）子域名[^8]风格，例如：
+API`/apis/networking.k8s.io/v1alpha1`的分组是`networking.k8s.io`，版本是`v1alpha1`。
+特别是通过CRD扩展Kubernetes API时，使用组织的伪子域名作为API分组名称似乎已经成为一种约定，例如：
+[istio](https://istio.io/)组织使用`networking.istio.io`作为分组名来扩展Kubernetes API。
+
+
+
+:::tip API分组的历史
+我们在这里有必要提及一下Kubernetes API引入*分组*的历史。
+
+在[Kubernetes v1.1.0](https://github.com/kubernetes/kubernetes/tree/v1.1.0)以前，Kubernetes API只有版本的概念，每个版本对应不同的API路径前缀，例如`api/v1/`，`/api/v1beta3`等。
+在[Kubernetes v1.1.0-beta](https://github.com/kubernetes/kubernetes/tree/v1.1.0-beta)，官方开发者正式发起API分组的提案：[<GithubSVG/> Pull Request #12951](https://github.com/kubernetes/kubernetes/pull/12951)。
+在该提案中，官方开发者认为API引入分组的目的和相应的好处有：
+> 1. Breaking the monolithic v1 API into modular groups and allowing groups to be enabled/disabled individually. This allows us to break the monolithic API server to smaller components in the future.
+> 2. Supporting different versions in different groups. This allows different groups to evolve at different speed.
+
+意思是说：
+> 1. 将单个"整块"的v1 API分组模块化，并且允许单独启用/禁用某个分组。这使我们能够将API服务端分解为更小的组件。
+> 2. 在同一个分组中可以有不同的版本。这使得不同的分组间可以以不同的速度并行迭代。
+
+在操作细节上，作者提出：
+* 对于已有的API，为了向前兼容，它们的API路径维持不变；
+* 对于未来可能出现的新API分组，根路径需要为`apis/`而非原先的`api/`，同时将组名及版本信息依次置于`apis/`后，即`apis/{group}/{version}/`。
+
+
+因此，**并不是所有的Kubernetes API都带有分组信息**。例如：在分组之前就存在的API`api/v1/namespaces/default/pods`仍然维持不变。
+
+对于新的分组，在[Kubernetes v1.2.0-alpha.2](https://github.com/kubernetes/kubernetes/tree/v1.2.0-alpha.2)正式迎来了第一个新的API分组`extensions`，它的API REST路径是`apis/extensions/`。
+像后来大家熟知的`deployments`，`daemonsets`，`jobs`等资源类型最开始都被放置在这个实验性质的分组中"孵化"。
+在[Kubernetes v1.2.0-beta.0](https://github.com/kubernetes/kubernetes/tree/v1.2.0-beta.0)，`jobs`从`extensions`分组正式迁移到`batch`分组：[<GithubSVG /> Pull Request #21434](https://github.com/kubernetes/kubernetes/pull/21434)；
+在[Kubernetes v1.6.0-beta.1](https://github.com/kubernetes/kubernetes/tree/v1.6.0-beta.1)，`deployments`从`extensions`分组正式迁移到`apps`分组：[<GithubSVG /> Pull Request #39683](https://github.com/kubernetes/kubernetes/pull/39683)。
+
+
+:::
 
 ## 资源类型（resource type）
 
-Kubernetes API URI[^3]按照是否含有命名空间（namespace）的信息又可以分为两类：
+Kubernetes API URI[^9]按照是否含有命名空间（namespace）[^10]的信息又可以分为两类：
 * `/apis/{group}/{version}/...`
 * `/apis/{group}/{version}/namespaces/{namespace}/...`
 
-在上述两类的URL模式中，紧跟其后的*路径片段（path segment）*[^4]被称为*资源类型（resource type）*[^5]。
+[ignore]: # (请注意，我们在这里并没有提及为什么有的API不带有命名空间信息的原因——我们其实有意而为之。
+             我们的目标是在**不循环定义**的情况下（也就是在给出*resource*的定义前不提及*resource*），希望可以给出*resource*一个可能的精确描述。
+             在正式到达我们的目标之前，我们不会提及*resource*本身。在我们知道了*resource*的定义之后，我们可以再回过头来去了解为什么有的API并不包括命名空间。)
+
+
+在上述两类的URL模式中，紧跟其后的路径片段被称为*资源类型（resource type）*。
 即，
-`/apis/{group}/{version}/{resource type}/...`
-`/apis/{group}/{version}/namespaces/{namespace}/{resource type}`
+* `/apis/{group}/{version}/{resource type}/...`
+* `/apis/{group}/{version}/namespaces/{namespace}/{resource type}`。
+
+例如：
+* API`/apis/authorization.k8s.io/v1/subjectaccessreviews`对应的资源类型是`subjectaccessreviews`;
+* API`/api/batch/v1/namespaces/default/jobs`对应的资源类型是`jobs`;
+
+另外，资源类型作为API URI中的一个标识，它们是小写的且为复数形式的。
+
+:::tip 说明
+上述的定义来自于:
+> [Kubernetes API terminology](https://kubernetes.io/docs/reference/using-api/api-concepts/#standard-api-terminology)
+>
+>  A resource type is the name used in the URL
+
+官方的描述其实还是略显模糊，因为此描述并没有解释*name*又是什么。但是至少透露出一个信息：***resource type*是基于Kubernetes API URL的一个概念**。
+因此我们根据官方想要表达的意思，基于Kubernetes API URI的规则，给出了我们对*resource type*的定义。
+
+需要在这里提醒的是，依据官方的描述，*资源类型*是Kubernetes API URI中一个特定位置的标识——我们其实已经**在没有引入*资源*的前提下定义了*资源类型***。
+:::
 
 
-[//]: # (* `/apis/batch/v1/jobs`: 此API endpoint用于获取集群中所有的job。)
-[//]: # (* `/api/batch/v1/namespaces/{namespace-name}/jobs`: 此API endpoint用于获取某一个namespace下面所有的job。)
-[//]: # (* `/api/batch/v1/namespaces/{namespace-name}/jobs/{job-name}`: 此API endpoint用于访问某一个namespace下面某一个具体的job。)
-
-## 初识[^6]kind
-我们现在知道资源类型是Kubernetes API URL中特定位置中使用的一个标识（identifier）。
-而每种资源类型在**Go语言**中都对应一个具体的类型（Golang type），这些类型被统称为*kind*。例如，资源类型`cronjobs`对应的Go类型是`Cronjob`[^7]：
+## 初识[^11]kind
+我们现在已经知道*资源类型*是Kubernetes API URI中特定位置中使用的一个标识（identifier）。
+在Kubernetes源码中，每种*资源类型*在**Go语言**中都对应一个具体的类型（Golang type），这些类型被统称为*kind*。例如，资源类型`cronjobs`对应的Go类型是`Cronjob`：
 ```go title=k8s.io/api/batch/v1/types.go
 type CronJob struct {
 	metav1.TypeMeta `json:",inline"`
@@ -49,101 +194,490 @@ type CronJob struct {
 	Status CronJobStatus `json:"status,omitempty" protobuf:"bytes,3,opt,name=status"`
 }
 ```
-另外，所有Kubernetes原生的*kind*被定义在`k8s.io/api`库中。
+
+与其他语言一样，Go语言也有命名约定（name conventions）。对于类型（type），Go中的[约定](https://go.dev/doc/effective_go#mixed-caps)是使用 lower camel case（小驼峰式）或者upper camel case（大驼峰式）来命名多词名称。
+同时，如果一个类型需要在包外可见，它的第一个字母应该是大写的。Kubernetes源码遵循这种命名约定，*kind*作为Go类型，类型名称自然符合驼峰形式。 此外，相比于*资源类型*是复数，kind名称则是单数形式。
+
+:::tip
+所有Kubernetes原生的*kind*被定义在`k8s.io/api`库中。另外，不同于分组和版本在URL上以路径片段存在的形式，在`k8s.io/api`库中，每个分组和版本都对应一个目录（包）：
+<details>
+<summary>api库目录结构</summary>
+
+```
+|-- admission
+|   |-- v1
+|   `-- v1beta1
+|-- admissionregistration
+|   |-- v1
+|   |-- v1alpha1
+|   `-- v1beta1
+|-- apidiscovery
+|   `-- v2beta1
+|-- apiserverinternal
+|   `-- v1alpha1
+|-- apps
+|   |-- v1
+|   |-- v1beta1
+|   `-- v1beta2
+|-- authentication
+|   |-- v1
+|   |-- v1alpha1
+|   `-- v1beta1
+|-- authorization
+|   |-- v1
+|   `-- v1beta1
+|-- autoscaling
+|   |-- v1
+|   |-- v2
+|   |-- v2beta1
+|   `-- v2beta2
+|-- batch
+|   |-- v1
+|   `-- v1beta1
+|-- certificates
+|   |-- v1
+|   |-- v1alpha1
+|   `-- v1beta1
+|-- coordination
+|   |-- v1
+|   `-- v1beta1
+|-- core
+|   `-- v1
+|-- discovery
+|   |-- v1
+|   `-- v1beta1
+|-- events
+|   |-- v1
+|   `-- v1beta1
+|-- extensions
+|   `-- v1beta1
+|-- flowcontrol
+|   |-- v1alpha1
+|   |-- v1beta1
+|   |-- v1beta2
+|   `-- v1beta3
+|-- imagepolicy
+|   `-- v1alpha1
+|-- networking
+|   |-- v1
+|   |-- v1alpha1
+|   `-- v1beta1
+|-- node
+|   |-- v1
+|   |-- v1alpha1
+|   `-- v1beta1
+|-- policy
+|   |-- v1
+|   `-- v1beta1
+|-- rbac
+|   |-- v1
+|   |-- v1alpha1
+|   `-- v1beta1
+|-- resource
+|   `-- v1alpha2
+|-- scheduling
+|   |-- v1
+|   |-- v1alpha1
+|   `-- v1beta1
+|-- storage
+|   |-- v1
+|   |-- v1alpha1
+|   `-- v1beta1
+```
+</details>
+
+*kind*被定义在不同的目录中以作区分；
+
+分组和版本除了在包结构上的体现以外，它们也被记录在每个*kind*的`apiVersion`字段中，例如：`Job`的`apiVersion`字段为`batch/v1`；`Deployment`的`apiVersion`字段为`apps/v1`。
+
+至于为什么用一个版本字段同时记录分组以及版本信息最早可以追溯到引入API分组的提案：[<GithubSVG /> Pull Request #12951](https://github.com/kubernetes/kubernetes/pull/12951)。
+其实在没有API分组以前，*kind*的`apiVersion`字段仅用于记录API版本信息。例如`v1`。
+在提案中，作者为了加快开发进度[^12]决定不新增字段而是继续使用`apiVersion`字段，只是以`{version}/{group}`字符串拼接的方式把分组和版本信息一并放入`apiVersion`字段。
+同时，对于已经存在的*kind*，例如`Pod`，`apiVersion`字段也还是保留为`v1`。
+在[Kubernetes v1.2.0-alpha.2](#https://github.com/kubernetes/kubernetes/tree/v1.2.0-alpha.2)，社区在迎来第一个新的分组`extensions`的同时，原先就存在的*kind*也拥有了一个正式的分组名——`core`（核心）[^13]。
+
+:::
+
+## 从Kubernetes kind到Kubernetes资源——再识Kubernetes资源
+*kind*作为Kubernetes源码中的Go类型，站在集群运行的角度，Kubernetes组件（`kube-apiserver`、`kubelet`等）在运行时可以在内存中创建kind的具体实例（instance），这些实例也可以通过序列化以字节的形式或在网络中传输（JSON格式）或写入磁盘中（etcd）。
+简而言之，*kind*的具体实例被称作*资源（resource）*。在Kubernetes中，每个*资源*都有属于自己的一个名字。
+
+同时，每个资源也独立地对应一个API URI——将资源的名字（作为*路径片段*）追加在资源类型后即可：
+`/apis/{group}/{version}/namespaces/{namespace}/{resource type}/{name}`。
+例如：一个*资源类型*为`jobs`且名字为`my-job`的*资源*对应的API URI为`/api/batch/v1/namespaces/default/jobs/my-job`。
+
+:::tip
+有时，在相关技术文章和博客中，我们甚至也可以见到用资源的API URL指代资源本身的情况。例如：
+Kubernetes社区核心贡献者 [Jordan Liggitt](https://github.com/liggitt) 在StackOverflow上的一个[回答](https://stackoverflow.com/a/52314551):
+
+> A specific URL used to obtain the object is a resource.
+> For example, a list of v1 Pod objects can be obtained from the `/api/v1/pods` resource.
+> A specific v1 Pod object can be obtained from the `/api/v1/namespaces/<namespace-name>/pods/<pod-name>` resource.
+
+总之，术语*Kubernetes资源*被广泛用于各种文档和博客中，但是它的实际意义需要根据不同的上下文具体分析得出。
+:::
 
 
-## Kubernetes资源（resource）
-*kind*作为Go类型，Kubernetes可以在内存中创建它们的具体实例（instance），这些实例可以通过序列化以字节的形式或在网络中传输或写入磁盘中（etcd）。
-简而言之，资源类型的具体实例被称作*资源（resource）*[^8]。
+### 小结
 
-在Kubernetes中，每个资源都有一个名称。同时每个资源也对应一个API URI，我们可以通过这个URI对资源进行增删改查。
-具体的对应规则为：将资源名称（作为*路径片段*）追加在资源类型对应的URI后：
-`/apis/{group}/{version}/namespaces/{namespace}/{resource type}/{name}`
-例如：
-`/api/batch/v1/namespaces/default/jobs/my-job`。
+:::tip 总结
+从Kubernetes API的规则到*资源类型*，从*资源类型*再到*kind*的定义，从*kind*再到*资源*，
+我们按照文档[Kubernetes API terminology <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/api-concepts/#standard-api-terminology)的思路**严格地**定义了这些术语。
+经验告诉我们，越是严格的定义往往越是晦涩。
 
-### 我们本可不必如此
-从Kubernetes API Path的规则到*资源类型*的定义，从*资源类型*再到*kind*的定义，从*kind*再到*资源*，
-我们其实是按照文档[Kubernetes API terminology <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/api-concepts/#standard-api-terminology)中的顺序意在可以**严格地**描述这些术语。
-当然，我们本可不必如此。或许你早就在各类文档和博客中接触过*资源*这个术语，并且在心里也大致知道这个词的所指。
-其实*Kubernetes资源*的概念其实与*HTTP资源*的概念非常类似。在HTTP上下文环境中，*资源*是指：
-> The target of an HTTP request is called a "resource", whose nature isn't defined further; it can be a document, a photo, or anything else. Each resource is identified by a Uniform Resource Identifier (URI) used throughout HTTP for identifying resources.
+当然这种严格也相应地带来一些好处——我们可以基于它更全面完整地了解最初对Kubernetes资源的全貌。
+Kubernetes资源既然是*kind*的实例，它们并不局限于以JSON的形式存在，它们可以是：YAML以及序列化后的字节流（bytes）。
+同时，在Kubernetes系统中，这些数据形式又存在于多种媒介中：内存（`kubectl`，`kube-apiserver`，`kubelet`等）、网络（HTTP）、文件（YAML）、磁盘（etcd）。
 
-HTTP请求的**目标**即为*资源*，资源的性质则没有进一步的规范，它可以是一个文档，一张照片或者是其他任何东西。每个资源都由一个URI标识。
-
-在Kubernetes中，如果我们放弃一些严谨性，也可以这样**笼统地**定义*资源*：向Kubernetes API请求的**目标**即为*Kubernetes资源*，它代表的可以是集群中具体存在的实体（如`pod`）或者其他*非实体*（关于*非实体*请参考下面[Kubernetes对象](#Kubernetes对象（Kubernetes-Object）)小节）。
-另外，我们在文档[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)确实找到关于资源的另一种描述：
-> **Resource** a representation of a system entity, sent or retrieved as JSON via HTTP to the server.
-
-这个描述其实已经非常接近于*HTTP资源*的概念了。
-当然它和另一种定义本质上并不冲突——集群中的一个物理实体（或非实体）既可以在内存中以Go对象（实例）的形式存在，也可以以字节序列的形式在网络中通过HTTP协议传输或者存于磁盘中，它们其实是等价的。
-
-## Kubernetes对象（Kubernetes Object）
-在绝大多数情况下[^10]，一个*资源（resource）*对应一个*Kubernetes对象（Kubernetes Object）*。
-*Kubernetes Object*是指资源中需要持久化的资源实例（persistent entity），用以**记录**集群的*期望状态*（**record** of intent）[^11]。
-换句话说，通过创建Kubernetes对象，你其实相当于告诉Kubernetes系统你希望集群的工作负载是什么样子的——这就是集群的*期望状态*。
-例如，如果你创建了一个pod对象，Kubernetes会持续确保相应的容器存在并且正在按照你的描述运行。
-
-除了定义上的细微差别外，*资源*的概念更倾向于在Kubernetes HTTP API上下文中使用[^12]，而*Kubernetes Object*更被侧重用于对集群期望状态的一种描述。
-在不严格区分定义的情况下，*resource*和*Kubernetes object*两个概念往往可以被互换使用。
+在绝大多数时候，我们对*Kubernetes资源*的第一种认知已经足够（即便它可能是模糊的）。
+我们其实也可以基于[第一种认知](#从http资源到kubernetes资源初识kubernetes资源)它去理解*资源类型*以及*kind*：
+* *资源类型*是*Kubernetes资源*所属种类的名称，它们（以小写和复数的形式）作为API URL中特定位置的一个标识。
+* *kind*是*Kubernetes资源*JSON格式在序列化前对应的Go类型。当然，如果不局限于具体语言，我们也可以把*kind*认为是JSON的Schema[^14]。
+:::
 
 
+## 其它API术语
+
+到现在，我们已经了解了*资源*，*资源类型*，*kind* 这些API术语。其实还有一些其他术语，它们同样与Kubernetes二次开发息息相关；
+
+这些术语包括：*虚拟资源*，*Kubernetes对象*，以及*子资源*；
+
+## 初识Kubernetes虚拟资源
+
+在正式介绍*Kubernetes虚拟资源*之前，我想先从一个特殊的Kubernetes API说起：
+
+`/apis/authorization.k8s.io/v1/selfsubjectaccessreviews`。
+
+这个API可以用来判断我们对某个资源类型是否有相应的权限[^15]。
+例如：假如我们想判断自己是否在`default`命名空间下创建`deployments`资源类型的权限，我们可以通过如下POST请求：
+```
+POST /apis/authorization.k8s.io/v1/selfsubjectaccessreviews
+{
+  "apiVersion": "authorization.k8s.io/v1",
+  "kind": "SelfSubjectAccessReview",
+  "spec": {
+    "resourceAttributes": {
+      "group": "apps",
+      "resource": "deployments",
+      "verb": "create",
+      "namespace": "default"
+    }
+  }
+}
+```
+此API请求的一个返回是：
+```
+{
+  "apiVersion": "authorization.k8s.io/v1",
+  "kind": "SelfSubjectAccessReview",
+  "metadata": {
+    "creationTimestamp": null
+  },
+  "spec": {
+    "resourceAttributes": {
+      "group": "apps",
+      "resource": "deployments",
+      "namespace": "dev",
+      "verb": "create"
+    }
+  },
+  "status": {
+    "allowed": true,
+    "denied": false
+  }
+}
+```
+我们可以通过返回体中`status`字段的`allowed`来判断我们是否含有相应的权限。
+
+
+
+根据我们先前的定义，这个API的分组为`authorization.k8s.io`版本为`v1`，资源类型为`selfsubjectaccessreviews`。
+另外，这个资源类型在Kubernetes源码`k8s.io/api`库中对应的Go类型是`SelfSubjectAccessReview`：
+```go title="k8s.io/authorization/v1/types.go"
+type SelfSubjectAccessReview struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
+
+	Spec SelfSubjectAccessReviewSpec `json:"spec" protobuf:"bytes,2,opt,name=spec"`
+
+	Status SubjectAccessReviewStatus `json:"status,omitempty" protobuf:"bytes,3,opt,name=status"`
+}
+```
+`SelfSubjectAccessReview`类型的实例（经过序列化/反序列化）以JSON的形式在客户端与Kubernetes API Server间传输。
+
+因此，如果根据定义，`SelfSubjectAccessReview`类型的实例仍然属于Kubernetes资源，只是它相比于我们熟知的资源`pod`等有所不同——它们并不代表集群中的任何"实体"[^16]。
+它们仅作为Kubernetes API Server中某些特殊API与客户端间HTTP通信的"**消息载体**"（payload）。这类Kubernetes资源被称为*虚拟资源*。
+
+:::tip
+在这里，我们通过一个例子引入*虚拟资源*。
+在后面的小节中，我们还会用更为严谨的叙述来定义*Kubernetes虚拟资源*。
+就像我们定义*资源*一样，严谨往往意味着我们需要引入额外的概念来辅助解释它本身。
+:::
+
+
+### 从Kubernetes API的声明式配置说起
+
+为了定义什么是*虚拟资源*，我们还需要从Kubernetes API的设计说起。
+不过在介绍本小节内容之前，我们要事先了解两个基础概念：*命令式系统*与*声明式系统*。
+
+<details>
+<summary>命令式系统与声明式系统</summary>
+
+- 在*命令式系统*中，用户知道系统的期望状态，由用户来决定系统达到期望状态的命令序列，并向系统提供命令序列。
+- 在*声明式系统*中，用户知道系统的期望状态，用户仅向系统提供期望状态的描述，由系统来确定从当前状态达到期望状态所需要的动作序列。
+
+<details>
+<summary>一个简单的例子</summary>
+我们以泡一壶茶为例。
+在声明式系统中，用户只要提供一个期望状态的描述即可：
+
+```text
+- 请给我一杯40度的绿茶
+```
+而在命令式系统中，用户则需要向系统达到目标状态的完整的命令序列：
+
+```text
+- 将水烧至100度
+- 把水倒入茶杯中
+- 放入一个绿茶包
+- 等待水温降至40度
+```
+</details>
+
+关于声明式系统和命令式系统完整的介绍以及与Kubernetes的联系可以参考Kubernetes文档特别兴趣小组成员[Andrew Chen](https://github.com/kubernetes/community/blob/master/sig-docs/README.md#emeritus-leads)的博文: [Imperative vs Declarative](https://dominik-tornow.medium.com/imperative-vs-declarative-8abc7dcae82e)。
+
+</details>
+
+
+根据Kubernetes设计文档[The Kubernetes Resource Model (KRM) <GithubSVG />](https://github.com/kubernetes/design-proposals-archive/blob/main/architecture/resource-management.md)，Kubernetes被设计成一个声明式资源管理系统。
+而Kubernetes API作为系统唯一的对外交互接口也因此被设计成支持*资源的声明式配置（Declarative Configuration）*。
+所谓*资源的声明式配置*是指用户向Kubernetes API仅提供资源的期望状态的描述，接下来交由系统控制以使资源达到其期望状态。
+
+例如，当我们通过Kubernetes API创建一个`Deployment`资源时，
+```bash
+POST apis/apps/v1/deployments
+{
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+        "name": "test",
+        "labels": {
+            "app": "test"
+        }
+    },
+    "spec": {
+        # highlight-next-line
+        "replicas": 3,
+        "template": {
+            "metadata": {
+                "name": "test",
+                "labels": {
+                    "app": "test"
+                }
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "name": "test",
+                        "image": "busybox",
+                        "imagePullPolicy": "IfNotPresent"
+                    }
+                ],
+                "restartPolicy": "Always"
+            }
+        },
+        "selector": {
+            "matchLabels": {
+                "app": "test"
+            }
+        }
+    }
+}
+```
+其中，JSON格式的请求体（*资源*）可以理解成是一种对集群*期望状态*的描述。
+用户将`replicas`字段设置为`3`其实表示用户期望此部署要有3个实例运行在集群中。
+Kubernetes则会采取一系列动作来确保集群中始终有3个实例在运行——例如，当某个实例运行的节点发生故障，`kubelet`则会在另一个节点中创建新的实例以确保资源的当前状态与用户的期望状态保持一致。
+显然，Kubernetes系统需要记录资源的期望状态才能在之后不断将资源的当前状态与期望状态"对齐"。
+
+
+### Kubernetes对象（Kubernetes Object）
+
+
+正如在上一小节中所说的那样，Kubernetes需要记录资源的期望状态。
+而在Kubernetes中，那些需要持久化（存入`etcd`）的资源实例（persistent entity）被称为*Kubernetes对象（Kubernetes Object）*。
+同时，*Kubernetes对象*也可以理解成一种对"资源期望状态的记录（record of intent）"。
+
+
+
+
+:::tip
+对*Kubernetes对象*的定义来自于对三个官方文档的整合：
+<details>
+<summary>官方文档中关于Kubernetes对象的解释</summary>
+
+* [Objects In Kubernetes <KubernetesSVG />](https://kubernetes.io/docs/concepts/overview/working-with-objects/)
+  > [Understanding Kubernetes objects](https://kubernetes.io/docs/concepts/overview/working-with-objects/#kubernetes-objects)
+  >
+  > Kubernetes objects are persistent entities in the Kubernetes system. Kubernetes uses these entities to represent the state of your cluster.
+
+* [Kubernetes API Concepts <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/api-concepts/)
+  > [Kubernetes API terminology <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/api-concepts/#standard-api-terminology)
+  >
+  > Most Kubernetes API resource types are objects – they represent a concrete instance of a concept on the cluster, like a pod or namespace.
+
+* [API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
+  > [Types (Kinds)](https:  //github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#types-kinds)
+  >
+  > Objects represent a persistent entity in the system.
+  > Creating an API object is a record of intent - once created, the system will work to ensure that resource exists. All API objects have common metadata.
+
+</details>
+
+
+根据定义，*Kubernetes对象*不仅可以是`deployments`，`daemonsets`这样"实打实"的集群[工作负载（workloads）](https://kubernetes.io/docs/concepts/workloads/)，
+它们也可以是`services`，`configmaps`，`clusterroles`，`clusterrolebindings`，`serviceaccounts`——只要它们被Kubernetes存入`etcd`中。
+
+另外，通常所说的Kubernetes"实体"就是指*Kubernetes对象*。
+:::
+
+#### spec和status
+几乎所有的Kubernetes对象都包含两个字段：`spec`和`status`。用户/客户端在创建对象时，`spec`字段用以描述资源的期望状态；
+`status`字段则用于记录和更新资源的当前状态——这个字段通常是由Kubernetes系统内部组件或者*控制器（Controller）*[^4]更新；
+
+:::tip
+并不是所有的Kubernetes对象都包含这两个字段，例如：[`configmap`](https://kubernetes.io/docs/concepts/configuration/configmap/)、[`secret`](https://kubernetes.io/docs/concepts/configuration/secret/)，它们并不包含`spec`和`status`字段，但它们有一个`data`字段用于记录要存储的数据；
+所以，我们也可以认为并不是所有的*Kubernetes对象*都必须带有"状态"的属性，它们有的单纯只是需要存储的数据；
+:::
+
+
+### 再识Kubernetes虚拟资源
+基于*Kubernetes对象*的定义，换言之，Kubernetes中存在部分资源并不需要被存入`etcd`中。这些资源被成为*虚拟资源（virtual resource）*。
+
+:::tip
+对于*虚拟资源*，即便它们并不具有"状态"的属性，也不需要被存入`etcd`中，但是它们往往也会包含`spec`和`status`字段（例如`subjectaccessreview`）。
+按照社区的说法[^17]，这样做的原因是为了在风格上保持一致；
+:::
+
+
+:::tip 小节
+至此，我们知道Kubernetes资源可以分为两类：*Kubernetes对象*以及*Kubernetes虚拟资源*；
+
+尽管*资源*包括*Kubernetes对象*，*资源*的概念更倾向于在Kubernetes API上下文中使用[^18]，
+而*Kubernetes对象*更被侧重用于对集群期望状态的一种描述。
+在不严格区分定义的情况下，*资源*和*Kubernetes对象*两个概念往往可以被互换使用。
+:::
+下图总结了Kubernetes资源和Kubernetes对象的区别和联系：
 <img src={ResourceAndObjectPNG} width="95%"/>;
 
 ## 子资源（subresource）
-在Kubernetes API 中，还存在一类特殊[^13]的API。它们的形式为在普通资源对应的URI后继续追加一个*路径片段*得到的URI，即：
+在Kubernetes API中，还存在一类特殊的API。它们的结构为在普通资源对应的URI后继续追加一个路径片段得到的URI，即：
 `/apis/{group}/{version}/namespaces/{namespace}/{resource type}/{name}/{subresource}`，
-其中最后的路径片段被成为子资源。
+其中最后追加的标识被成为子资源。
 需要注意的是，**子资源并不对应集群中任何实体或虚拟资源**，它们旨在提供与资源资紧密耦合的某种操作或视角。
 例如，
 * API `/api/v1/namespaces/{namespace}/pods/{name}/log`可以检索某个pod的日志；
 * API `/api/v1/namespaces/{namespace}/pods/{name}/portforward`可以将本地的端口转发到某个pod中监听的一个或多个端口上；
-* API `/api/v1/namespaces/{namespace}/pods/{name}/exec`可以远程在某个pod的容器中执行命令。
+* API `/api/v1/namespaces/{namespace}/pods/{name}/exec`可以远程在某个pod的容器中执行命令；
+* API `/api/v1/namespace/{namespace}/pods/{name}/status` 可以检索或者更新某个pod的当前状态。
 
-另外，在kubernetes中所有的实体资源（即Kubernetes对象）都有`status`子资源。我们在后续小节中还会详细介绍它。
+:::tip
+除了API URI Path上的特殊性外，这些API的特殊性主要体现在以下两点：
+1. 不符合Kubernetes API RESTful风格，它们中有的（例如`exec`，`portforward`）甚至采用了[Websocket协议](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#websockets-and-spdy)。
+2. 不符合Kubernetes API[*声明式配置（declarative configuration）*](#从kubernetes-api的声明式配置说起)规范。
+:::
 
-[comment]: # (TODO: 根据apiserver的源码，我们的定义没有错：registerResourceHandlers, splitSubresource, https://github.com/kubernetes/apiserver/blob/master/pkg/endpoints/installer.go#L493-L495)
+需要注意的是，在Kubernetes中所有*Kubernetes对象*都有`status`子资源用于检索或者更新资源的当前状态；
+我们在后续章节中还会详细介绍`status`子资源。
+:::tip 子资源的历史
+
+关于引入子资源的历史最早可以追溯到Kubernetes社区的一个讨论[Issue #2776](https://github.com/kubernetes/kubernetes/issues/2726)。
+这个讨论涉及到应该如何恰当地更新*Kubernetes对象*的当前状态。
+这个问题本质上是由于在没有引入*子资源*以前，
+客户端/用户对资源的修改以及Kubernetes系统内组件对资源当前状态的更新会存在[并发控制和一致性问题 <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency)，尤其是当更新频繁的时候，这种并发冲突会愈发地严重。
+基于此，开发者认为需要将对资源`spec`字段的更新与`status`字段的更新分离。
+在这个讨论里，官方开发者们提出了很多想法，他们最终采纳了*子资源*的方式——即在普通资源对应的API URL后追加一个路径片段`/status`暴露一个资源的"子"API，同时这个"子"API仅能更新资源的`status`字段而忽略掉其他字段（`spec`）；
+*子资源*的[<GithubSVG /> Pull Request #4779](https://github.com/kubernetes/kubernetes/pull/4779)被合并，并在[Kubernetes v0.13.0](https://github.com/kubernetes/kubernetes/tree/v0.13.0)中发布；
+:::
+
+[TODO]: # ()
+
 
 
 ## 小结
 :::tip
 在本节中，我们给出了很多似乎有些晦涩而又相似的概念，这些概念又好像在描述同一个东西。
-但是区分这些专业术语有助于我们理解实现自定义控制器的诸多细节。
+但是区分和了解这些API术语是Kubernetes二次开发的基础并且有助于我们理解自定义控制器的诸多细节。
 :::
-总之，本节的各个术语确实容易混淆，为了方便读者区分这些概念，本节的内容可以被总结成如下图所示。
+总之，本节的各个术语确实容易混淆，为了方便读者区分这些概念，本节的内容可以被总结成下图。
+
+
 <img src={ResourceObjectKindPNG} width="95%"/>
 <img src={VirtualResourcePNG} width="95%"/>
 
-[^1]: 请参考Kubernetes社区关于引入API分组的[设计提案 <GithubSVG />](https://github.com/kubernetes/design-proposals-archive/blob/main/api-machinery/api-group.md)。
+[^1]: 并不是所有的Kubernetes API都严格基于*RESTful*风格。Kubernetes API Server部分API基于HTTP增强协议[WebSocket](https://datatracker.ietf.org/doc/html/rfc6455)和[SPDY](https://www.chromium.org/spdy/spdy-whitepaper/)。
+      例如，当你使用`kubectl exec`命令时，`kubectl`与`kube-apiserver`之间基于WebSocket协议，`kube-apiserver`与`kubelet`间的通信基于SPDY协议。
+
+[^2]: *Kubernetes资源*在各类文章和博客中被广泛使用，但大多数时候对这个专有名词的使用并不准确。本节的一个使命就是基于Kubernetes文档就对这些广泛使用的术语给出精确的表述。
+[^3]: 关于什么是*RESTful*请参考提出者Roy T. Fielding的[学位论文](https://www.ics.uci.edu/~fielding/pubs/dissertation/top.htm)。
+[^4]: *控制器（Controller）*的概念我们会在后续[controller](../client-go/controller)章节详细介绍它。
+[^5]: Leonard Richardson, Sam Ruby. [RESTful Web Services](https://www.oreilly.com/library/view/restful-web-services/9780596529260/) Ch. 4.
+      > A resource is anything that’s important enough to be referenced as a thing in itself. If your users might “want to create a hypertext link to it, make or refute assertions about it, retrieve or cache a representation of it, include all or part of it by reference into another representation, annotate it, or perform other operations on it”, then you should make it a resource.
+      >
+      >  Usually, a resource is something that can be stored on a computer and represented as a stream of bits: a document, a row in a database, or the result of running an algorithm.
+[^5]: Roy T. Fielding (2000). [*Architectural Styles and the Design of Network-based Software Architectures*](https://www.ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm#sec_5_2_1_2), Ch. 5.
+[^6]: 我们并没有把"entity"翻译为"实体"是因为Kubernetes资源也可能是集群中一个"虚拟"的"内容"。我们接下来还会在本节[其他API术语](#其他API术语)详细介绍它们；
+[^7]: [API Overview <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/)
+      > [API groups](https://kubernetes.io/docs/reference/using-api/#api-groups)
+      >
+      > API groups make it easier to extend the Kubernetes API.
+[^8]: *伪子域名*表示并非一定真实存在这样的域名，它仅指代一种风格。
+[^9]: *API URI*也可以理解成*API endpoint*、*API path*或者*API REST path*。这些术语在Kubernetes官方文档中等价并被交换使用。
+[^10]: *命名空间*的概念属于读者需要掌握的[预备知识](../intro#谁适合阅读本书)之一，我们不在这里多做赘述；
+[^11]: 在这里，我们仅仅是引入了*kind*的概念，在后续章节中我们还会继续对*kind*作出更为全面的阐述。
+[^12]: [Supporting multiple API groups <GithubSVG />](https://github.com/kubernetes/kubernetes/blob/v1.1.0-beta/docs/proposals/api-group.md)
+       > [Bookkeeping for groups](https://github.com/kubernetes/kubernetes/blob/v1.1.0-beta/docs/proposals/api-group.md#bookkeeping-for-groups)
+       >
+       > For a fast implementation targeting the v1.1 deadline, we will concatenate group with version, in the form of "group/version", and use it where a version string is expected, so that many code can be reused.
+[^13]: 这是我们能够找到关于`core`分组名称由来最早的记录：[API Conventions(v1.2.0-alpha.2) <GithubSVG />](https://github.com/kubernetes/kubernetes/blob/v1.2.0-alpha.2/docs/api.md)。
+       > [API groups](https://github.com/kubernetes/kubernetes/blob/v1.2.0-alpha.2/docs/api.md#api-groups)
+       >
+       > Currently there are two API groups in use:
+       >
+       >  1\. the "core" group, which is at REST path /api/v1 and is not specified as part of the apiVersion field, e.g. apiVersion: v1.
+       >
+       >  2\. the "extensions" group, which is at REST path /apis/extensions/$VERSION, and which uses apiVersion: extensions/$VERSION (e.g. currently apiVersion: extensions/v1beta1).
+[^14]: [JSON Schema](https://json-schema.org/)
+[^15]: Kubernetes权限管理本身并不在本书讨论范围之内，请参考文档[authentication <KubernetesSVG/>](https://kubernetes.io/docs/reference/access-authn-authz/authentication/)。
+[^16]: 在本节的[kubernetes对象](#kubernetes对象kubernetes-object)我们会明确说明Kubernetes"实体"的具体含义。
+[^17]: [API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)
+       > [Spec and Status](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#spec-and-status)
+       >
+       > Some objects which are not persisted in the system - such as SubjectAccessReview and other webhook style calls - may choose to add spec and status to encapsulate a "call and response" pattern.
+       > The spec is the request (often a request for information) and the status is the response.
+[^18]: [The API Object Lifecycle <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/object-lifecycle.md)
+       >
+       > The Kubernetes API (and related APIs in the ecosystem) defines "objects" (**also called resources in REST context**) which are created, managed, and deleted over time.
+[^2]:
+      你可以在Kubernetes API对应的[OpenAPI](https://www.openapis.org/) [specification文件 <GithubSVG />](https://github.com/kubernetes/kubernetes/blob/release-1.27/api/openapi-spec/swagger.json)中找到所有API的schema。
+      另外，[Kubernetes API reference <KubernetesSVG />](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/)以文档的形式记录所有了所有API的详细说明。
+
+[^1]:
 [^2]: 还存在一种特殊情况，`pods`和一些其他*资源类型*在[API分组提案 <GithubSVG />](https://github.com/kubernetes/design-proposals-archive/blob/main/api-machinery/api-group.md)引入之前就已经存在于Kubernetes。
       为了向后兼容，这些早期的资源类型也被仍未所属于所谓的*核心组（Core Group）*——或者也叫做为*"历史遗留（legacy）"组*——此分组由**空字符串**表示。
       它们的API根路径由于历史原因仍然保留为`/api/v1`。
-[^3]: *API URI*也可以理解成*API endpoint*、*API path*或者*API REST path*。
+[^2]: 我们以[Kubernetes v1.0.0](https://github.com/kubernetes/kubernetes/tree/v1.0.0)为例，在[Kubernetes v1.0.0](https://github.com/kubernetes/kubernetes/tree/v1.0.0)时仍有部分API未演化成稳定版本，以`api/v1beta3/`为根路径，参考[API swagger spec](https://github.com/kubernetes/kubernetes/blob/v1.0.0/api/swagger-spec/v1beta3.json)。
+[^3]: 在提案[api-group](https://github.com/kubernetes/kubernetes/blob/v1.1.0-beta/docs/proposals/api-group.md#bookkeeping-for-groups)中，作者写到：
+      > For a fast implementation targeting the v1.1 deadline, we will concatenate group with version, in the form of "group/version", and use it where a version string is expected, so that many code can be reused.
+[^3]:
       在有关Kubernetes API的文档中([Kubernetes API Concepts <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/api-concepts/)、[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)、[Kubernetes API Reference Docs <KubernetesSVG />](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#-strong-api-overview-strong-))，
       这些术语是等价的。
-[^4]: “路径片段”在这里指一个URI path中两个相邻"/"间的字符串。英语术语为*path segment*（参见：[rfc3986](https://www.rfc-editor.org/rfc/rfc3986#section-3.3)）。
-[^5]: 我们认为想要给出*resource type*的精确描述是困难的。关于什么是*resource type*我们在文档[Kubernetes API terminology <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/api-concepts/#standard-api-terminology)中仅找到一处简短说明：
-      > A resource type is the name used in the URL (pods, namespaces, services)
+[^6]:
+[^7]:
 
-      我们之所以称它为“说明”而非“定义”是因为此描述中*name*并没有给出解释。但是文档中的描述至少透露出一个信息：***resource type*是基于Kubernetes API URL的一个概念**。
-      因此我们从Kubernetes API URL规则出发，在尽量**不循环定义**的情况下（也就是在给出*resource type*的定义前不提及与*resource*相关的术语），希望可以基于官方文档中想要表达的本意给出*resource type*一个**可能的**的精确描述。
-      相比于正文，我们在这里甚至可以给出一个更为精确的描述：任意给定一个存在的Kubernetes API URL，存在一个正则表达式`apis\/\w+\/v\d+(?:alpha\d+|beta\d+)*\/(\w+)[^$|\/]`，使得总能匹配出此URL包含的*resource type*。
-[^6]: 在这里，我们仅仅是引入了*kind*的概念，在后续章节中我们还会继续对*kind*作出更为全面的定义。
-[^7]: 与其他语言一样，Go语言也有命名约定（name conventions）。对于类型（type），Go中的[约定](https://go.dev/doc/effective_go#mixed-caps)是使用 lower camel case（小驼峰式）或者upper camel case（大驼峰式）来命名多词名称。 同时，如果一个类型需要在包外可见，它的第一个字母应该是大写的。
-      因此，kind作为Go类型，名称自然也是符合这种约定的。此外，相比于resource type是复数形式，resource type对应的kind名称则是单数形式的。
-
-[^8]: 此定义来自于[Kubernetes API terminology <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/api-concepts/#standard-api-terminology)。
-      值得一提的是，在有些上下文中，*resource*这个术语甚至也可以用来代指Kubernetes HTTP API URL本身。例如，
-      Kubernetes官方成员，核心贡献者 [Jordan Liggitt](https://github.com/liggitt) 在[StackOverflow上的一个回答](https://github.com/liggitt)。
-      但是我们认为在这个回答中，Jordan其实想表达的是*HTTP resource*的概念而并不是*Kubernetes resource*本身。
-      总之，这个词的实际意义需要根据不同的上下文环境具体分析得出。
+[^8]:
 [^9]: [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Identifying_resources_on_the_Web)
-[^10]: Kubernetes中存在一小部分资源类型并不对应集群中具体的实体，这些资源被成为*虚拟资源（virtual resource）*，例如，`subjectaccessreviews`这个虚拟资源用于权限检查。
-       但是根据我们先前的定义，它有对应的Kubernetes API Path，有对应的Go类型，可以被序列化为JSON格式的字节数据在HTTP中传输，所以它仍然符合*Kubernetes资源*的范畴。
+[^10]: Kubernetes中存在一小部分资源类型并不对应集群中具体的实体，这些资源被成为*虚拟资源（virtual resource）*，
+       但是根据我们先前的定义，它们有对应的Kubernetes API Path，有对应的Go类型，可以被序列化为JSON格式的字节数据在HTTP中传输，所以它仍然符合*Kubernetes资源*的范畴。
 [^11]: *Kubernetes对象*的定义来自于[Kubernetes API Conventions <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md)。
        但是我们没有在Kubernetes文档中找到*集群期望状态*的进一步描述。我们认为，在Kubernetes中，*集群期望状态*是集群中各*资源期望状态*的集合。☁️ 而*资源的期望状态*在后续[kubernetes对象的期望状态与实际状态](../client-go/controller#kubernetes对象的期望状态与实际状态)小节中会有更为详尽的说明。
-[^12]: 在文档[Kubernetes Object Lifecycle <GithubSVG />](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/object-lifecycle.md)中，我们可以找到这样一句话：
-       > also called *resources* in REST context
-[^13]: 除了API URI Path上的特殊性外，这些API的特殊性主要体现在以下两点：
-       1. 并不属于RESTful规范，它们有的（例如`exec`，`portforward`，`logging`）甚至采用了[Websocket协议](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#websockets-and-spdy)。
-       2. 根据Kubernetes资源管理的设计[Resource Management <GithubSVG />](https://github.com/kubernetes/design-proposals-archive/blob/main/architecture/resource-management.md#)，Kubernetes API被设计成*声明式（declarative）*的交互接口。但是，有些子资源对应的API则违反了这种规范。
+

@@ -144,10 +144,10 @@ for event := range eventChannel {
 
 ### 从Kubernetes watch机制到Informer
 
-幸运的是在`client-go`中，官方开发者已经为我们实现了**基于watch机制的本地资源缓存机制**——`Informer`组件。它设计的初衷旨在让开发者尽量避免直接通过Kubernetes API检索资源集合从而达到减轻Kubernetes服务端压力的目的。
+幸运的是在`client-go`中，官方开发者已经为我们实现了**基于watch机制的本地资源缓存机制**——`Informer`组件。它设计的初衷旨在让开发者尽量避免直接通过Kubernetes API检索资源集合从而达到减轻Kubernetes服务端压力。
 当然，它也完美契合了我们对于控制器的需求：
-1. 资源变更事件的通知；
-2. 本地资源的缓存。
+1. 资源变更事件的通知；👉 以优化协调动作的触发时机。
+2. Kubernetes资源的本地缓存。👉 让我们拥有一个高效检索Kubernetes资源集合的方式。
 
 
 [^1]: *声明式系统*其实是一个与*命令式（imperative）系统*相对的概念。在命令式系统中，由用户提供如何使系统达到期望状态的具体命令序列或步骤。

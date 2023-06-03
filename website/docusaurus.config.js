@@ -93,6 +93,14 @@ const config = {
         theme: lightCodeTheme,
         darkTheme: darkCodeTheme,
       },
+      announcementBar: {
+        id: 'progress',
+        content:
+            `v0.6 is in progress and is expected to be released in August. The progress can be tracked from <a href="https://github.com/caozhuozi/crd-controller-from-scratch#plan-towards-v06">v0.6 Plan</a>. Last Update: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' })}`,
+        backgroundColor: '#fafbfc',
+        textColor: '#091E42',
+        isCloseable: false,
+      },
     }),
 };
 

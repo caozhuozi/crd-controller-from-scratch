@@ -9,13 +9,13 @@ import Logo22SVG from '@site/static/img/logo-22.svg';
 
 # 前言
 
-## 写在前面的话
+## 写在前面
 
 > Hello! 谢谢你愿意与我一起度过一段时光。
 >
 > 我并不是一个善于写作的人，生活中也会出现因为用错成语而引起误会的糗事。
 > 写书对我来说是一件困难的事情，不管是章节编排，叙事顺序或者代码的难易程度，每一点都会影响到知识的传达和读者的阅读体验。
-> 另外，我也只不是是一名普通的Kubernetes学习者，为了尽可能确保书中每一个论述都是正确可靠的，有时需要花费大量的时间从文档和源码中寻找答案。
+> 另外，我也只是一名普通的Kubernetes学习者，为了尽可能确保书中每一个论述都是正确可靠的，有时需要花费大量的时间从文档和源码中寻找答案。
 >
 > 但是即便如此，我总觉得把知识分享给需要的人是一件有意义的事情，哪怕可以帮助到一个人呢。生活总需要一点浪漫主义。
 
@@ -107,7 +107,9 @@ import Logo22SVG from '@site/static/img/logo-22.svg';
 1. Kubernetes请求的生命周期
    * [Programming Kubernetes](https://www.oreilly.com/library/view/programming-kubernetes/9781492047094/) by Michael Hausenblas, Stefan Schimanski, Ch. 2, Ch. 4。
    * [<YoutubeSVG /> Life of a Kubernetes API Request](https://www.youtube.com/watch?v=ryeINNfVOi8) by Daniel Smith(a KubeCon talk)
-2. Kubernetes资源管理设计文档
+2. Kubernetes资源的版本转化
+   * [hub version](https://book.kubebuilder.io/multiversion-tutorial/conversion-concepts.html)
+3. Kubernetes资源管理设计文档
    * [<GithubSVG /> Kubernetes Resource Model](https://github.com/kubernetes/design-proposals-archive/blob/main/architecture/resource-management.md)
    * [<GithubSVG /> Declarative application management in Kubernetes](https://github.com/kubernetes/design-proposals-archive/blob/main/architecture/declarative-application-management.md)
 
@@ -118,10 +120,10 @@ import Logo22SVG from '@site/static/img/logo-22.svg';
 
 <KubernetesSVG /> + 🎈 = <Logo22SVG />
 
-## 勘误与建议
-本书仍然处于预发布阶段，我想离我心目中的1.0版本还有一段距离。
-而且我也只是一个普通的Kubernetes学习者，水平有限。
-如果你发现任何错误或者有任何建议，请在[Github](https://github.com/caozhuozi/crd-controller-from-scratch/issues)上留言，我们在此谢过。
+<!-- ## 勘误与建议 -->
+<!-- 本书仍然处于预发布阶段，我想离我心目中的1.0版本还有一段距离。 -->
+<!-- 而且我也只是一个普通的Kubernetes学习者，水平有限。 -->
+<!-- 如果你发现任何错误或者有任何建议，请在[Github](https://github.com/caozhuozi/crd-controller-from-scratch/issues)上留言，我们在此谢过。 -->
 
 
 
@@ -134,7 +136,7 @@ import Logo22SVG from '@site/static/img/logo-22.svg';
 [^2]: 特指kubebuilder的子项目[controller-runtime](https://github.com/kubernetes-sigs/controller-runtime)，[controller-tools](https://github.com/kubernetes-sigs/controller-tools)。
 operator-sdk框架同样也依赖于这两个子项目提供的库和工具。
 [^3]: 你应该知道书籍《[The Go Programming Language](https://www.gopl.io/)》的1-10，12章所要表述的知识；你也应该知道[Go modules](https://go.dev/blog/using-go-modules)的概念。
-[^4]: 你应该知道书籍《[Kubernetes in  Action](https://www.manning.com/books/kubernetes-in-action)》中前两部分（PART1，PART2）所要传达的知识；你最好也有使用`kubectl`工具管理过Kubernetes*资源*的经验。
+[^4]: 你应该知道书籍《[Kubernetes in  Action, edition 1](https://www.manning.com/books/kubernetes-in-action)》中前两部分（PART1，PART2）所要传达的知识；你需要知道Kubernetes集群的[组成及架构](https://kubernetes.io/docs/concepts/overview/components/)；你也有使用[kubectl](https://kubernetes.io/docs/reference/kubectl/)工具管理Kubernetes集群的经验。
 [^5]: 你应该知道什么是[Kubernetes Custom Resources <KubernetesSVG />](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#custom-resources)以及如何[使用*CustomResourceDefinition*来扩展Kubernetes API <KubernetesSVG />](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/)。
 [^6]: 你应该至少能理解这个使用`client-go`库的[例子](https://github.com/kubernetes/client-go/tree/master/examples/create-update-delete-deployment)。
 [^7]: 截止到目前，我们只找到两本包含实现自定义控制器内容的书籍。
