@@ -25,39 +25,42 @@ import Logo22SVG from '@site/static/img/logo-22.svg';
 你或许已经接触过像[kubebuilder](https://kubernetes.io/blog/2018/08/10/introducing-kubebuilder-an-sdk-for-building-kubernetes-apis-using-crds/)，[operator-sdk](https://sdk.operatorframework.io/)
 这些帮助你构建一个完备并且可用于生产的控制器框架[^1]。然而这些框架对于刚接触自定义控制器的初学者来说过于庞大和复杂，想要透过它们去真正了解自定义控制器的原理是一件十分困难的事情。
 
-本书将在不借助任何框架以及框架本身所依赖的库和工具[^2]的情况下，仅依赖[`k8s.io/apimachinery`](https://github.com/kubernetes/apimachinery)以及[`k8s.io/client-go`](https://github.com/kubernetes/client-go)这两个基础库
+本书将在不借助任何框架以及框架本身所依赖的库[^2]和工具[^3]的情况下，仅依赖[`k8s.io/apimachinery`](https://github.com/kubernetes/apimachinery)以及[`k8s.io/client-go`](https://github.com/kubernetes/client-go)这两个基础库
 实现一个极为简单的自定义控制器。
-我们希望这本书可以成为一个实现Kubernetes自定义控制器**入门**读物，基于此，她能够让你更好地去理解
+我们希望这本书可以成为了解和实现Kubernetes自定义控制器的**入门**读物。另外我们也希望这本书可以作为[kubebuilder](https://book.kubebuilder.io/)的预备读物，但愿她能够帮助你更好地去理解
 [kubebuilder](https://book.kubebuilder.io/)以及其他更上层的控制器框架。
-同时，我们希望阅读完本书的读者能够对实现自定义控制器的基本步骤和所需的核心模块
+同时，我们希望阅读完本书的读者对实现自定义控制器的基本步骤和所需的核心模块
 有一个清晰的认知，这也是我们的初衷。
 
 :::tip
-你也可以带着这个目的来阅读本书：对实现自定义控制器基本步骤和核心模块要有一个清晰的认知。
+希望你始终怀揣着这个目的来阅读：对实现自定义控制器基本步骤和核心模块要有一个清晰的认知。
 :::
 
 ## 谁适合阅读本书
 1. 想要知道如何**基于Go**实现一个Kubernetes自定义控制器的**初学者**；
-2. 对Go语言有一定[^3]基础；
-3. 了解Kubernetes[^4]以及Kubernetes *自定义资源（Custom Resource）*的相关概念[^5]；
-4. 对client-go编程有一定[^6]基础。
+2. 对Go语言有一定[^4]基础；
+3. 了解Kubernetes[^5]以及Kubernetes *自定义资源（Custom Resource）*的相关概念[^6]；
+4. 对client-go编程有一定[^7]基础。
 
 
 
 ## 你还能从本书学到什么
-* 与Kubernetes API有关术语的**严格**描述；
-* `apimachiery`库中如何对*Kubernetes资源*进行序列化/反序列化；
-* *Kubernetes控制器*指的是什么；
-* `client-go`库中`RESTClient`以及`Informer`组件的介绍和使用。
+1. 与Kubernetes二次开发相关API术语的严格描述；
+2. `apimachiery`库中
+   * 如何抽象Kubernetes API类型系统；
+   * 如何对*Kubernetes资源*序列化/反序列化；
+3. `client-go`库中
+   * 基础组件`RESTClient`的用法和原理；
+   * `Informer`组件的剖析；
+4. 如何实现Kubernetes**原生资源**控制器。
 
 
 ## 本书结构
 本书的[最后一章](./putting-it-all-together/putting-it-all-together)才会正式介绍一个极简的自定义控制器的代码实现，在此之前的章节都可以算作是最后一章的铺垫。
 
-具体来说，[第一章](./apimachinery/apimachinery)和[第二章](./client-go/client-go)我们会分别介绍`apimachinery`库与`client-go`库中涉及到实现控制器的预备知识和组件，
-[第三章](./putting-it-all-together/putting-it-all-together)定位为"putting it all together"，我们不会对代码做过多的讲解，你可以通过代码注释中提供的索引跳转到前两章中对应的知识点。
-
-这样编排的目的是我们希望你进入[最后一章](./putting-it-all-together/putting-it-all-together)时可以快速理解每行代码背后的意图，并且能够做到知其然知其所以然。
+具体来说，[第一章](./apimachinery/apimachinery)和[第二章](./client-go/client-go)我们会分别介绍`apimachinery`库与`client-go`库中涉及到实现控制器的理论知识和必要的组件，
+[第三章](./putting-it-all-together/putting-it-all-together)的定位是"putting it all together"，我们不会对代码做任何讲解或者提供解释性的注释，你可以通过代码中的索引跳转到前两章中对应的知识点。
+这样编排的目的是我们希望你进入[最后一章](./putting-it-all-together/putting-it-all-together)时可以理解每行代码背后的意图，真正做到知其然知其所以然。
 
 
 
@@ -65,12 +68,17 @@ import Logo22SVG from '@site/static/img/logo-22.svg';
 ## 本书风格及约定
 
 ### 风格
-本书出现的术语以及概念尽可能会给出官方引用。我们所说的官方文档来源有两处：
-一个是Kubernetes正式发布到[kubernetes.io](https://kubernetes.io/)的文档或博客，另一个是仅收录在Kubernetes github [community仓库](https://github.com/kubernetes/community)中但未发布到站点的文档。
+
+本书的一个特点是"忠于文档"——本书出现的术语、概念以及论述会尽可能地给出官方引用。我们所说的官方引用来源有两处：我们所说的官方引用来源有两处：
+一个是Kubernetes正式发布到[kubernetes.io](https://kubernetes.io/)站点的文档或博客，另一个是仅收录在Kubernetes github [community仓库](https://github.com/kubernetes/community)中但未发布到站点的文档。
 对于这两种文档来源我们会分别在引用处加上 "<KubernetesSVG />" 标记以及 "<GithubSVG />" 以作区分。
 
-另外，为了阅读本书时思维的整体连贯性，同时也为了减轻读者的阅读负担，我们会把部分细节和思考从正文中剥离放在脚注中。
+另外，为了阅读本书时思维的整体连贯性，同时也为了减轻读者的阅读负担，
 我们不会过分追求Kubernetes源码细节，更不会对Kubernetes源码大段的走读。
+我们所选取的所有内容都恰好可以用于实现我们最后所编写的控制器。
+通俗地说，本书致力于解释"为这么要使用这个Kubernetes组件来实现控制器"以及"如何使用这个Kubernetes组件"，而不是"死抠这个Kubernetes组件内部实现的细节"。
+
+除此以外，对于特别复杂的知识体系，为了便于读者理解，我们甚至会根据它们对应的PR来介绍它们的历史和演化过程。
 
 本书的定位更偏向于教程，我们采用一种我们认为合适的路线，希望能够循序渐进地引导读者去理解最后自定义控制器的实现。
 
@@ -83,36 +91,46 @@ import Logo22SVG from '@site/static/img/logo-22.svg';
 
 另外，本书中图示中出现的文字和代码中的注释都为英文。
 
-## 与同类书籍的比较[^7]
-1. 《[Programming Kubernetes](https://www.oreilly.com/library/view/programming-kubernetes/9781492047094/)》by Michael Hausenblas, Stefan Schimanski
-2. 《[Kubernetes Programming with Go: Programming Kubernetes Clients and Operators Using Go and the Kubernetes API](https://www.oreilly.com/library/view/kubernetes-programming-with/9781484290262/?_gl=1*ddqtnc*_ga*NDgwMjY0MDMzLjE2Nzg5MzY0NTc.*_ga_092EL089CH*MTY4NTYyMDQ0NC40LjEuMTY4NTYyMDUwMy4xLjAuMA..)》by Philippe Martin
+## 与同类书籍的比较[^8]
+1. 《[Programming Kubernetes](https://www.oreilly.com/library/view/programming-kubernetes/9781492047094/)》by Michael Hausenblas, Stefan Schimanski, 2019
+2. 《[Kubernetes Programming with Go: Programming Kubernetes Clients and Operators Using Go and the Kubernetes API](https://www.oreilly.com/library/view/kubernetes-programming-with/9781484290262/?_gl=1*ddqtnc*_ga*NDgwMjY0MDMzLjE2Nzg5MzY0NTc.*_ga_092EL089CH*MTY4NTYyMDQ0NC40LjEuMTY4NTYyMDUwMy4xLjAuMA..)》by Philippe Martin, 2023
 
 这两本书中关于自定义控制器的部分仍然都是基于`kubebuilder`框架，而我们将不会借助任何第三方框架教读者实现一个自定义控制器。
 
 除此以外，上述两本书涵盖了许多与实现控制器本身无关的内容，
-而对于本书来说，我们所引入的预备知识会尽量保持简洁，并不会面面俱到——这些内容恰好能够用于理解最后编写的控制器。
+而对于本书来说，我们所引入的预备知识会尽量保持简洁，并不会面面俱到——这些内容恰好能够用于理解和实现最后编写的控制器。
 
 总之，我们只专注于做一件事——教会读者仅依赖`apimachinery`和`client-go`库实现一个精简的自定义控制器。
 
 
-## 本书局限
-我们为了尽量追求实现控制器的简洁，导致实现的控制器会有以下局限：
-* 并没有考虑[*CRD*多版本](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/)情况；
-* 没有[defaulting/validating webhook](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/)；
-* 仅使用`client-go`的`Informer`基础组件而放弃更为完备和高效的`SharedIndexInformer`。
+## 局限
+本书只聚焦于控制器本身的实现，如何使用CRD来扩展Kubernetes API（以及背后的原理）并不是本书要讨论的内容。
+使用CRD来扩展Kubernetes API属于阅读本书需要掌握的[预备知识](#谁适合阅读本书)。
 
+
+其次，为了尽可能地追求控制器的简洁，导致了实现的控制器：
+* 没有考虑[*CRD*多版本](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definition-versioning/)情况；
+* 没有[defaulting/validating webhook](https://kubernetes.io/docs/reference/access-authn-authz/extensible-admission-controllers/)；
+
+另外，不同于kubebuilder等成熟框架，我们只专注于控制器本身逻辑的实现，本书并不提供配套的部署文件（包括`role`、`rolebindings`等）。
 
 
 ## 扩展阅读
-1. Kubernetes请求的生命周期
-   * [Programming Kubernetes](https://www.oreilly.com/library/view/programming-kubernetes/9781492047094/) by Michael Hausenblas, Stefan Schimanski, Ch. 2, Ch. 4。
-   * [<YoutubeSVG /> Life of a Kubernetes API Request](https://www.youtube.com/watch?v=ryeINNfVOi8) by Daniel Smith(a KubeCon talk)
-2. Kubernetes资源的版本转化
-   * [hub version](https://book.kubebuilder.io/multiversion-tutorial/conversion-concepts.html)
-3. Kubernetes资源管理设计文档
-   * [<GithubSVG /> Kubernetes Resource Model](https://github.com/kubernetes/design-proposals-archive/blob/main/architecture/resource-management.md)
-   * [<GithubSVG /> Declarative application management in Kubernetes](https://github.com/kubernetes/design-proposals-archive/blob/main/architecture/declarative-application-management.md)
 
+下面列举了本书中所有非Kubernetes官方文档的引用：
+
+1. Kubernetes请求的生命周期
+   * [📖 Programming Kubernetes](https://www.oreilly.com/library/view/programming-kubernetes/9781492047094/) by Michael Hausenblas, Stefan Schimanski, Ch. 2, Ch. 4。
+   * [<YoutubeSVG /> Life of a Kubernetes API Request](https://www.youtube.com/watch?v=ryeINNfVOi8) by Daniel Smith(a KubeCon talk)
+2. Kubernetes资源版本转化机制
+   * [📄 hub version](https://book.kubebuilder.io/multiversion-tutorial/conversion-concepts.html)
+3. 声明式系统与命令式系统
+   * [📄 Imperative vs Declarative](https://dominik-tornow.medium.com/imperative-vs-declarative-8abc7dcae82e) by Andrew Chen, Dominik Tornow, medium
+4. HTTP语境下的资源
+   * [📄 Identifying resources on the Web](https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/Identifying_resources_on_the_Web), mdn web docs
+   * [📖 RESTful Web Services](https://www.oreilly.com/library/view/restful-web-services/9780596529260/) by Leonard Richardson, Sam Ruby, Ch. 4.
+5. Kubernetes术语
+   * [📄 Difference between Kubernetes Objects and Resources](https://stackoverflow.com/questions/52309496/difference-between-kubernetes-objects-and-resources), by Jordan Liggitt, stackoverflow
 
 
 ## 关于气球🎈
@@ -128,18 +146,13 @@ import Logo22SVG from '@site/static/img/logo-22.svg';
 
 
 [^1]: 你可以在[这里 <KubernetesSVG />](https://kubernetes.io/blog/2018/08/10/introducing-kubebuilder-an-sdk-for-building-kubernetes-apis-using-crds/)找到基于其他语言的控制器框架。
-
-[^2]: 其实官方也提供了一个没有使用构建框架来实现的自定义控制器样例
-[sample-controller](https://github.com/kubernetes/sample-controller)。这个样例虽然相对来说比完全基于框架的控制器简单，
-但是它仍然依赖于kubebuilder的子项目[controller-runtime](https://github.com/kubernetes-sigs/controller-runtime)。
-
-[^2]: 特指kubebuilder的子项目[controller-runtime](https://github.com/kubernetes-sigs/controller-runtime)，[controller-tools](https://github.com/kubernetes-sigs/controller-tools)。
-operator-sdk框架同样也依赖于这两个子项目提供的库和工具。
-[^3]: 你应该知道书籍《[The Go Programming Language](https://www.gopl.io/)》的1-10，12章所要表述的知识；你也应该知道[Go modules](https://go.dev/blog/using-go-modules)的概念。
-[^4]: 你应该知道书籍《[Kubernetes in  Action, edition 1](https://www.manning.com/books/kubernetes-in-action)》中前两部分（PART1，PART2）所要传达的知识；你需要知道Kubernetes集群的[组成及架构](https://kubernetes.io/docs/concepts/overview/components/)；你也有使用[kubectl](https://kubernetes.io/docs/reference/kubectl/)工具管理Kubernetes集群的经验。
-[^5]: 你应该知道什么是[Kubernetes Custom Resources <KubernetesSVG />](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#custom-resources)以及如何[使用*CustomResourceDefinition*来扩展Kubernetes API <KubernetesSVG />](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/)。
-[^6]: 你应该至少能理解这个使用`client-go`库的[例子](https://github.com/kubernetes/client-go/tree/master/examples/create-update-delete-deployment)。
-[^7]: 截止到目前，我们只找到两本包含实现自定义控制器内容的书籍。
+[^2]: 其实官方也提供了一个没有使用构建框架来实现的自定义控制器样例[sample-controller](https://github.com/kubernetes/sample-controller)。这个样例虽然相对来说比完全基于框架的控制器简单，但是它仍然依赖于kubebuilder的子项目[controller-runtime](https://github.com/kubernetes-sigs/controller-runtime)。
+[^3]: 我们甚至不借助Kubernetes的[`client-gen`](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-api-machinery/generating-clientset.md)工具来生成Kubernetes API客户端的代码。
+[^4]: 你应该知道书籍《[The Go Programming Language](https://www.gopl.io/)》的1-10，12章所要表述的知识；你也应该知道[Go modules](https://go.dev/blog/using-go-modules)的概念。
+[^5]: 你应该知道书籍《[Kubernetes in  Action, edition 1](https://www.manning.com/books/kubernetes-in-action)》中前两部分（PART1，PART2）所要传达的知识；你需要了解Kubernetes集群的[组成及架构](https://kubernetes.io/docs/concepts/overview/components/)；你也有使用[kubectl](https://kubernetes.io/docs/reference/kubectl/)工具管理Kubernetes集群的经验。
+[^6]: 你应该知道什么是[Kubernetes Custom Resources <KubernetesSVG />](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/#custom-resources)以及如何[使用*CustomResourceDefinition*来扩展Kubernetes API <KubernetesSVG />](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/)。
+[^7]: 你应该至少能理解这个使用`client-go`库的[例子](https://github.com/kubernetes/client-go/tree/master/examples/create-update-delete-deployment)。
+[^8]: 截止到目前，我们只找到两本包含实现自定义控制器内容的书籍。
 
 
 

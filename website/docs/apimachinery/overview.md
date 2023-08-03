@@ -16,7 +16,7 @@ id: apimachinery
 > This library is a shared dependency for servers and clients to work with Kubernetes API infrastructure without direct type dependencies.
 > Its first consumers are k8s.io/kubernetes, k8s.io/client-go, and k8s.io/apiserver.
 
-回到自定义控制器，虽然你现在可能并不知道Kubernetes控制器具体是什么，但是资源的控制器显然是需要对资源（无论是否为自定义资源）进行管理（增删改查等），`kube-apiserver`作为集群**唯一**[^5]对外的接口，
+回到自定义控制器，虽然你现在可能并不知道Kubernetes控制器具体是什么，但是资源的控制器显然是需要对资源（无论是否为自定义资源）进行管理（增删改查等），`kube-apiserver`作为集群**唯一**对外的接口，
 我们不可避免地需要与它直接交互。 这个交互的过程自然涉及到对HTTP请求体/返回体的编/解码。这也是我们需要深入了解`apimachinery`基础库的原因。
 
 
@@ -26,10 +26,9 @@ id: apimachinery
 :::
 
 
-[^1]: 此处的*资源*指的是*Kubernetes资源*（它也可以被成为*Kubernetes API对象*），并不是指用于声明容器中CPU/memory的`resources`，而是Kubernetes API上下文中的一个专业术语。在之后的[Kubernetes API 基础](./kubernetes-api#)小节中，我们会介绍它具体指的是什么。
+[^1]: 此处的*资源*指的是*Kubernetes资源*（在Kubernetes早期，它也被叫做*Kubernetes API对象*），并不是指用于声明容器中CPU/memory的`resources`，而是Kubernetes API上下文中的一个专业术语。在之后的[Kubernetes API 基础](./kubernetes-api)小节中，我们会介绍它具体指的是什么。
 [^2]: `kube-apiserver`除了要将网络传输的数据（HTTP 请求、返回）序列化/反序列化以外，将*Kubernetes资源*写入磁盘中（etcd）同样也涉及到序列化操作。
 [^3]: 一个Kubernetes API请求的生命周期远远不止序列化操作，但这些内容不在本书的讨论范围之内，请参考扩展阅读[Kubernetes API请求的生命周期](../intro#扩展阅读)。
 [^4]: 在本书中，*编/解码*与*序列化/反序列化*意思等同并且被交换使用。
-[^5]: Kubernetes集群架构设计不在本书的讨论范围，请参考扩展阅读[Kubernetes资源管理设计文档](intro#扩展阅读).
 
 

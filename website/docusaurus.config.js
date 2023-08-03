@@ -7,7 +7,7 @@ const darkCodeTheme = require('prism-react-renderer/themes/dracula');
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: '《从零实现Kubernetes自定义控制器》',
-  tagline: '',
+  tagline: '困住风的气球，开始斑斓的远行',
   favicon: 'img/favicon.ico',
 
   // Set the production url of your site here
@@ -95,11 +95,10 @@ const config = {
       },
       announcementBar: {
         id: 'progress',
-        content:
-            `v0.6 is in progress and is expected to be released in August. The progress can be tracked from <a href="https://github.com/caozhuozi/crd-controller-from-scratch#plan-towards-v06">v0.6 Plan</a>. Last Update: ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' })}`,
-        backgroundColor: '#fafbfc',
-        textColor: '#091E42',
-        isCloseable: false,
+        content: `🥳v0.6.0-rc1 is released.🎉`,
+        backgroundColor: '#e6f6e6',
+        textColor: '#5f805b',
+        isCloseable: true,
       },
     }),
 };

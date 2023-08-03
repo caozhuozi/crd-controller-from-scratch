@@ -1,12 +1,12 @@
 ---
-sidebar_position: 6
+sidebar_position: 4
 ---
 import PodPNG from '@site/static/img/pod.png';
 
 # kind案例探究
 
-在本节我们将通过`k8s.io/api`库的一个具体的kind案例——`Pod`来进一步诠释kind在实现上需要遵循的约定。
-探究原生kind的具体实现有助于我们理解自定义资源的Go类型的实现。
+在本节我们将通过`k8s.io/api`库的一个具体的*kind*案例——`Pod`及`PodList`来进一步诠释*kind*在实现上是如何具体需要遵循的约定的。
+探究原生*kind*的具体实现有助于我们实现*自定义资源*的Go类型。
 
 
 ## Pod
@@ -14,7 +14,7 @@ import PodPNG from '@site/static/img/pod.png';
 在Go语言中，如果一个类型实现了某接口，将此类型嵌入到另一个结构类型中，那么被嵌入的结构类型也等同于实现了该接口。
 
 在`k8s.io/api`库中定义了所有Kubernetes原生资源类型对应的kind。
-这些kind正是通过**类型嵌入**的方式来达到之前[kind与runtimeobject](./runtime.Object#kind与runtimeobject)小节所提及的实现基础接口`runtime.Object`等的效果。
+这些kind正是通过**类型嵌入**的方式来达到之前[kind与runtime.Object](./runtime.Object#kind与runtimeobject)小节所提及的实现基础接口`runtime.Object`等的效果。
 
 例如， 我们以`Pod`类型为例，
 ```go title="k8s.io/api/core/v1/types.go"
@@ -70,12 +70,8 @@ type PodList struct {
 
 综合以上四点，`PodList`类型同时实现了`runtime.Object`接口和`metav1.ListInterface`接口，并且含有名为`Items`的slice字段。根据定义，`PodList`类型应属于kind第二种类（即集合种类）。
 
-## 注册进全局Scheme
-
-kind只有注册进`scheme`结构中才能被编/解码，`Pod`及`PodList`也是如此。
-在之前[client-go中的全局Scheme对象](./client-go-and-apimachinery#client-go中的全局scheme对象)小节，我们已经对原生kind如何注册进client-go中的全局`Scheme`对象，我们不再进行赘述。
 
 ## 小结
-:::tip
-本节通过对`Pod`这个kind的探究，旨在为我们建立起一个编写自定义资源对应Go类型的模板。
+:::tip 小结
+本节通过对`Pod`及`PodList`这两个*kind*的探究，旨在为读者建立起一个编写*自定义资源*Go类型对应的模板。
 :::

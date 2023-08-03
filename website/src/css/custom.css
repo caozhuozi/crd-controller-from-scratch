@@ -39,7 +39,7 @@ h1 {
 }
 
 h2 {
-  font-size: 1.3rem !important;
+  font-size: 1.32rem !important;
 }
 
 h3 {
@@ -47,10 +47,10 @@ h3 {
 }
 
 /* making inline code no border seems better. Also make the background color more deeper when border has gone. */
-code {
-  border: 0;
-  background-color: rgb(242, 244, 244);
-}
+/*code {*/
+/*  border: 0;*/
+/*  background-color: rgb(242, 244, 244);*/
+/*}*/
 
 .menu {
   font-size: 17px;
@@ -62,19 +62,27 @@ code {
 .footnotes blockquote{
   font-size: 15px;
 }
-/* inline code */
-/*
-p code {
-  background-color: #00A40026;
-}
- */
 
+/* home page */
 .hero {
   background-color: rgb(8,40,177);
   background-image: url("/static/img/logo.png");
   background-position: bottom;
   background-repeat: no-repeat;
-  height: 80vh;
+  height: 82vh;
+}
+
+/* remove links' underline in admonitions */
+.alert a {
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+}
+.alert a:hover {
+  text-decoration: underline;
+}
+
+blockquote {
+  font-size: 17px;
 }
 
 /* For readability concerns, you should choose a lighter palette in dark mode. */
@@ -88,6 +96,7 @@ p code {
   --ifm-color-primary-lightest: #4fddbf;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
 }
+
 
 
 
