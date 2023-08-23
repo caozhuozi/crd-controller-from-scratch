@@ -166,7 +166,7 @@ func main() {
 在上述的例子中，我们说`RESTClient`基于建造者模式。其实更准确的说法是基于建造者模式的是`client-go`中的`Request`类型而非`RESTClient`。
 
 我们可以再回过头来具体看看`RESTClient`的接口`rest.Interface`，可以发现`RESTClient`的`Post()`，`Get()`，`Delete()`等方法其实返回是`Request`类型（指针），而不是`RESTClient`类型自身。
-真正执行向Kubernetes API发送请求动作的其实是是`Request`类型。
+真正执行向Kubernetes API发送请求动作的其实是`Request`类型。
 上述例子中的`Namespace()`，`Resource()`，`Name()`，`VersionedParams()`，等方法其实是`Request`类型的方法，这些方法返回的也是`Request`类型本身。所以`RESTClient`的链式调用其实在背后基于的是`Request`类型的建造者模式。
 
 

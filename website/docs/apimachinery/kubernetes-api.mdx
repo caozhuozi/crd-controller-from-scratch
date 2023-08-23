@@ -65,7 +65,7 @@ HTTP语境下的*Resource*的概念首次在[RFC 1630](rfc1630)中伴随URI(Unif
 
 也就是：**HTTP请求的"目标"即为*资源*，它可以是文档、图片或者是其他（存储在服务端的）任何"内容"**。
 :::tip 注
-这些"内容"也可以是是数据库中的一行数据，也可以是算法的执行结果等[^5]。
+这些"内容"也可以是数据库中的一行数据，也可以是算法的执行结果等[^5]。
 :::
 
 
@@ -101,13 +101,13 @@ HTTP语境下的*Resource*的概念首次在[RFC 1630](rfc1630)中伴随URI(Unif
 > * A single instance of a resource type is called a resource, and also usually represents an object
 
 
-事情似乎看起来并不简单，为了定义*Kubernetes资源*，官方还引入了*Resource Type*和*Kind*的概念。
+事情似乎看起来并不简单，为了定义*Kubernetes资源*，官方还引入了*resource type*和*kind*的概念。
 本节接下来的内容，便是对上述定义的详细解读。请跟随我一起开始了解这些术语吧。
 
 ## API分组（group）和版本化（version）
 
 :::tip 注
-为了解释清楚*Resource Type*、*Kind*、以及*Resource*这三个术语，我们需要从Kubernetes API URL的结构说起。
+为了解释清楚*resource type*、*kind*、以及*resource*这三个术语，我们需要从Kubernetes API URL的结构说起。
 :::
 
 为了便于扩展和迭代API，Kubernetes对所有API进行分组(API groups)和版本化(version)[^7]。
@@ -337,8 +337,8 @@ Kubernetes社区核心贡献者 [Jordan Liggitt](https://github.com/liggitt) 在
 我们按照文档[Kubernetes API terminology <KubernetesSVG />](https://kubernetes.io/docs/reference/using-api/api-concepts/#standard-api-terminology)的思路**严格地**定义了这些术语。
 经验告诉我们，越是严格的定义往往越是晦涩。
 
-当然这种严格也相应地带来一些好处——我们可以基于它更全面完整地了解最初对Kubernetes资源的全貌。
-Kubernetes资源既然是*kind*的实例，它们并不局限于以JSON的形式存在，它们可以是：YAML以及序列化后的字节流（bytes）。
+当然这种严格也相应地带来一些好处——我们可以更为全面地引申Kubernetes*资源*的所指。
+Kubernetes资源既然是*kind*的实例，那么它们将并不局限于以JSON的形式存在，它们也可以是：YAML格式甚至是（实例序列化后的）字节流（bytes）的形式等。
 同时，在Kubernetes系统中，这些数据形式又存在于多种媒介中：内存（`kubectl`，`kube-apiserver`，`kubelet`等）、网络（HTTP）、文件（YAML）、磁盘（etcd）。
 
 在绝大多数时候，我们对*Kubernetes资源*的第一种认知已经足够（即便它可能是模糊的）。
