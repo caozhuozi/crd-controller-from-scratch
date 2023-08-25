@@ -14,7 +14,7 @@ import PodPNG from '@site/static/img/pod.png';
 在Go语言中，如果一个类型实现了某接口，将此类型嵌入到另一个结构类型中，那么被嵌入的结构类型也等同于实现了该接口。
 
 在`k8s.io/api`库中定义了所有Kubernetes原生资源类型对应的kind。
-这些kind正是通过**类型嵌入**的方式来达到之前[kind与runtime.Object](./runtime.Object#kind与runtimeobject)小节所提及的实现基础接口`runtime.Object`等的效果。
+这些kind正是通过**类型嵌入**的方式来达到之前[kind与runtime.Object](./runtime.Object#kind与runtimeobject)小节所提及的实现基础接口`runtime.Object`同等的效果。
 
 例如， 我们以`Pod`类型为例，
 ```go title="k8s.io/api/core/v1/types.go"
