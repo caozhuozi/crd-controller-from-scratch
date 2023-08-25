@@ -21,7 +21,7 @@ import GitHubSVG from '@site/static/img/github-mark.svg';
 
 :::tip 注
 在本节中，我们并不准备带读者进行`Informer`的代码走读。`Informer`为了可靠和高效在实现上远比我们想象的复杂。
-为了便于让读者理解informer的主要逻辑，
+为了便于让读者理解`Informer`的主要逻辑，
 本节的内容基于`client-go` [v1.5.0](https://github.com/kubernetes/client-go/tree/v1.5.0)——这是`client-go`库正式引入`Informer`框架的最初版本[^1]，它与现在趋于稳定的版本已经接近，同时又相对精简，是我们了解informer框架非常好的材料。
 :::
 
@@ -40,8 +40,7 @@ import GitHubSVG from '@site/static/img/github-mark.svg';
 > Reflector watches a specified resource and causes all changes to be reflected in the given store.
 
 意思是说，`Reflector`监听指定的资源类型并使所有的变更事件**反映**到指定的存储（缓存）中。这就是`Reflector`名称的由来。
-
-
+关于"指定的存储（缓存）"我们在接下来我们还会详细介绍。在这里，我们只想告诉你`Reflector`的由来。
 
 :::
 
@@ -68,7 +67,7 @@ type ListerWatcher interface {
 除此以外，`ListerWatcher`还包括一个`List()`方法用于获取资源集合——在这里我们先暂且不说明需要它的原因，此刻我们还没有介绍`Reflector`组件整体的运行逻辑，贸然的解释或许只会让你更加疑惑。
 
 
-`client-go`中任何一个[*资源客户端*](./restclient#资源客户端)其实都满足这个接口。例如，`pods`资源客户端：
+`client-go`中任何一个[*资源客户端*](./restclient#资源客户端)其实都"满足"这个接口。例如，`pods`资源客户端：
 ```go title="k8s.io/client-go/kubernetes/typed/core/v1/pod.go"
 type PodInterface interface {
 	Create(*v1.Pod) (*v1.Pod, error)
@@ -82,11 +81,43 @@ type PodInterface interface {
 	// highlight-next-line
 	Watch(opts v1.ListOptions) (watch.Interface, error)
 	Patch(name string, pt api.PatchType, data []byte, subresources ...string) (result *v1.Pod, err error)
-	PodExpansion
+	// ...
 }
 ```
+:::tip 注
+其实，站在Go语法的角度，*资源客户端*并没有真正意义上实现`ListerWatcher`接口。我们以上述Pod资源客户端为例，请注意它的`List()`方法的返回类型上与`ListerWatcher`的细微差别：Pod资源客户端的`List()`返回类型是**`*v1.PodList`**。
+在Go语言中，`List(opts v1.ListOptions) (*v1.PodList, error)`并不等同于实现了`ListerWatcher`的`List(options api.ListOptions) (runtime.Object, error)`
+方法，尽管`*v1.PodList`类实现了`runtime.Object`接口。
 
-所以通常在创建`Reflector`对象时，我们只要把对应的资源客户端传入即可。
+```go
+// ❌ can not compile
+var _ ListerWatcher = clientset.Core().Pods("default")
+```
+
+
+
+当然，这涉及到Go语法本身的内容，不在我们的讨论范围之内。
+
+
+
+
+我们通常在创建`ListerWatcher`类时，其实我们只需要借助`client-go`为我们预先准备好的`cache.ListWatch`[^2]类型再稍加结合*资源客户端*本身就可以快捷地创建出一个`ListerWatcher`对象。例如：
+
+```go
+lw := cache.ListWatch{
+		ListFunc: func(options api.ListOptions) (runtime.Object, error) {
+			return clientset.Core().Pods("default").List(options)
+		},
+		WatchFunc: func(options api.ListOptions) (watch.Interface, error) {
+			return clientset.Core().Pods("default").Watch(options)
+		},
+}
+
+// ✅ can compile
+var _ ListerWatcher = lw
+
+```
+:::
 
 
 除了"监听逻辑"以外，`Reflector`中还包括两个**缓存**组件：`DeltaFIFO`以及`Indexer`。其中：
@@ -141,7 +172,7 @@ type Delta struct {
 > * You want to process the deletion of objects.
 > * You might want to periodically reprocess objects.
 
-可以看出`DeltaFIFO`设计之初就有意识地以资源作为队列"粒度"——以便在处理一个资源时（从队列中pop出一项），可以看到自从上一次处理它时所有的变更事件。
+可以看出`DeltaFIFO`设计之初就有意识地以资源作为队列"粒度"——以便在处理一个资源时（从队列中pop出一项），可以看到自从上一次处理它时**所有**的变更事件。
 另外，一个值得注意的细节是，作者在设计`DeltaFIFO`伊始就有意识地让这个结构可以**阶段性地重新处理所有事件**。这个"阶段性地重新处理"我们还会在后续[Reflector的resync机制](#reflector的resync机制)中详细介绍。
 :::
 
@@ -179,7 +210,7 @@ func (r *Reflector) Run(stopCh <-chan struct{}) {
 ```
 而`ListAndWatch()`方法中则会使用传入的`ListerWatcher`结构`lw`。
 具体来说，在`ListAndWatch()`方法中：
-1. `lw`的`List()`会被首先执行并且它**仅被执行一次**，用于一次性获取所有资源集合，得到的结果会存入`Indexer`缓存中；
+1. `lw`的`List()`会被首先执行并且它**仅被执行一次**，用于先一次性获取所有资源集合，得到的结果将存入`Indexer`缓存中；
 2. 之后通过调用`lw`的`Watch()`函数**持续**获取资源的变更事件并将结果压入`DeltaFIFO`缓存中。
 
 :::tip 注
@@ -187,7 +218,7 @@ func (r *Reflector) Run(stopCh <-chan struct{}) {
 :::
 
 需要注意的是，`Reflector`组件通过`Run()`函数启动之后，`DeltaFIFO`缓存开始持续不断加入变更事件。而另一个`Indexer`缓存在一次性获得资源集合后就没有再变动了。
-`Indexer`缓存之后的增、删、该则依赖另一个叫做[`Controller`](#controller组件)的组件驱动。
+`Indexer`缓存之后的增、删、改则依赖另一个叫做[`Controller`](#controller组件)的组件驱动。
 
 <img src={ReflectorPNG} style= {{height: "280px"}}/>
 
@@ -263,7 +294,7 @@ func(obj interface{}) error {
 `Process`函数以一个资源完整的变更事件切片（`Deltas`）为输入：
 
 1. 针对资源的每个变更事件（`for`循环），根据类型（`witch`语句），触发相应的"回调函数"：`OnUpdate()`，`OnUpdate()`，`OnDelete()`——这些"回调函数"在创建`Controller`组件时传入。
-   **它们实可以认为是`Controller`对外提供的资源变更事件的通知及处理机制**；
+   **它们实际可以认为是`Controller`对外提供的资源变更事件的通知及处理机制**；
    :::tip 注
    请暂时忽略代码中出现的`Synced`事件类型，从Kubernetes API Server中返回的资源变更事件仅有`Added`，`Updated`，`Deleted` 这三种。我们在后续[Reflector的resync机制](#reflector的resync机制)会介绍`Synced`事件类型的产生。
    :::
@@ -306,7 +337,7 @@ func(obj interface{}) error {
     2. `Reflector`子组件的`Indexer`缓存的**引用**以便调用者可以用它检索资源。
 
 :::tip
-在本节中，我们没有给出`Informer`的创建函数的源码作为参照。原因是由于组件众多，`Informer`创建函数本身逻辑较为混乱。感兴趣的读者可以根据上述说明自行找源码对照理解。
+在本节中，我们没有给出`Informer`的创建函数的源码作为参照。原因是由于所含组件众多，`Informer`初始化函数本身逻辑较为混乱。感兴趣的读者可以根据上述说明自行找源码对照理解。
 :::
 
  `Informer`的整体结构如下图所示：
@@ -317,7 +348,8 @@ func(obj interface{}) error {
 `Informer`的历史最早可以追溯到[<GitHubSVG /> Pull Request #6546](https://github.com/kubernetes/kubernetes/pull/6546)。
 引入`Informer`结构的动机根据作者commit信息（[880f922](https://github.com/lavalamp/kubernetes/commit/880f922bb673e4e9010cd848fe76e9c5b0d2bd1f)）:
 > Add easy setup for simple controller
-可见`Informer`是作为辅助创建`Controller`结构而存在的。
+
+可见`Informer`就是作为辅助便于创建`Controller`结构而存在的。
 
 :::
 
@@ -364,18 +396,103 @@ func NewReflector(
 :::tip `resync`机制的历史
 *resync*机制的引入最早可以追溯到[Pull Request #4923](https://github.com/kubernetes/kubernetes/pull/4923)。正如作者起的PR标题一样：
 > Allow reflector to do full resync periodically
+
 意思是说允许**`Reflector`**可以周期性地做**全同步**。
-请注意最初版本的*resync*并不是指从`Indexer`中同步回`DeltaFIFO`中，在此PR中，作者所谓的**全同步**就是指周期性地重新**`List()`**一次。
+不过最初版本的*resync*其实并不是指从`Indexer`中同步回`DeltaFIFO`中，在此PR中，作者所谓的**全同步**就是指周期性地重新**`List()`**一次。
 
 直到[<GitHubSVG /> Issue #23394](https://github.com/kubernetes/kubernetes/issues/23394)，社区开发者才决定将`List()`从*resync*中分离。
-最终，将`List()`从*resync*机制中分离的[<GitHubSVG /> Pull Request #24142](https://github.com/kubernetes/kubernetes/pull/24142)被合并入[Kubernetes v1.3.0-alpha.5](https://github.com/kubernetes/kubernetes/tree/v1.3.0-alpha.5)
-
-
-
+最终，将`List()`从*resync*机制中分离的[<GitHubSVG /> Pull Request #24142](https://github.com/kubernetes/kubernetes/pull/24142)被合并入[Kubernetes v1.3.0-alpha.5](https://github.com/kubernetes/kubernetes/tree/v1.3.0-alpha.5)。
 
 :::
 
 
+## 使用Informer
+
+可以说本小节之前的所有内容都在为如何使用`Informer`组件做铺垫。
+我们首先来看如何初始化一个`Informer`：
+<details>
+<summary>初始化Informer（基于client-go v1.5.2）</summary>
+
+```go
+import (
+	"fmt"
+
+	"k8s.io/client-go/1.5/kubernetes"
+	"k8s.io/client-go/1.5/pkg/api"
+	v1 "k8s.io/client-go/1.5/pkg/api/v1"
+	"k8s.io/client-go/1.5/pkg/runtime"
+	"k8s.io/client-go/1.5/pkg/watch"
+	"k8s.io/client-go/1.5/rest"
+	"k8s.io/client-go/1.5/tools/cache"
+)
+
+func main() {
+	// creates the in-cluster config
+	config, _ := rest.InClusterConfig()
+	// creates the clientset
+	clientset, _ := kubernetes.NewForConfig(config)
+
+	cache.NewInformer(&cache.ListWatch{
+		ListFunc: func(options api.ListOptions) (runtime.Object, error) {
+			return clientset.Core().Pods("default").List(options)
+		},
+		WatchFunc: func(options api.ListOptions) (watch.Interface, error) {
+			return clientset.Core().Pods("default").Watch(options)
+		},
+	},
+		&v1.Pod{},
+		0,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				p := obj.(*v1.Pod)
+				fmt.Printf("pod %s is added", p.Name)
+			},
+			UpdateFunc: func(oldObj, newObj interface{}) {
+				o := oldObj.(*v1.Pod)
+				n := newObj.(*v1.Pod)
+				fmt.Printf("pod %s is updated from %v to %v", o.Name, o.Spec, n.Spec)
+			},
+			DeleteFunc: func(obj interface{}) {
+				p := obj.(*v1.Pod)
+				fmt.Printf("pod %s is deleted", p.Name)
+			},
+		})
+}
+
+```
+</details>
+
+初始化`Informer`一共需要四个参数：
+* 某资源类型的监听函数
+* 所监听资源类型的*kind*
+* resync发生频率
+* 三种事件对应的回调函数（`AddFunc`，`UpdateFunc`，`DeleteFunc`）
+
+这四个参数已经在之前相应的各个组件中介绍过了，在这里我们不再赘述。
+
+接下来我们看看如何使用`Informer`。正如我们在前面所说，`Informer`组件本身并不具有任何实质性的组件，我们使用`Informer`本质上在使用它所**代为创建**的两个组件`Controller`和`Indexer`。
+
+`NewInformer`函数将代为创建的这两个组件返回以供调者使用：
+```go
+localCache, controller  := cache.NewInformer(...)
+```
+之后我们可以通过调用`Controller`的`Run()`函数让整个`Informer`运转起来。
+```go
+controller.Run()
+```
+而`Indexer`作为一个本地缓存结构，`client-go`为它提供了丰富的方法以供检索资源：
+```go title="k8s.io/client-go/tools/cache/store.go"
+type Store interface {
+	Add(obj interface{}) error
+	Update(obj interface{}) error
+	Delete(obj interface{}) error
+	List() []interface{}
+	ListKeys() []string
+	Get(obj interface{}) (item interface{}, exists bool, err error)
+	GetByKey(key string) (item interface{}, exists bool, err error)
+	// ...
+}
+```
 
 ## 小结
 
@@ -401,6 +518,7 @@ func NewReflector(
       关于`client-go`库的历史可以参考Kubernetes的[Issue #28559](https://github.com/kubernetes/kubernetes/issues/28559)。
 
       关于informer框架迁入`client-go`的历史可以参考`client-go`的[<GitHubSVG /> Issue #4](https://github.com/kubernetes/client-go/issues/4)以及Kubernetes的[<GitHubSVG /> Pull Request #32718](https://github.com/kubernetes/kubernetes/pull/32718)和[<GitHubSVG /> Pull Request #34989](https://github.com/kubernetes/kubernetes/pull/34989)。
+[^2]: 在本节中，`cache`指的是`client-go`的`tools`包中的`cache`子包。
 
 
 
