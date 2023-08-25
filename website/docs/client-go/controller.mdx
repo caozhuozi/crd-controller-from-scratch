@@ -36,9 +36,8 @@ import StreamWatcherSVG from '@site/static/img/streamwatcher.svg';
 > Controllers continuously strive to make the observed state match the desired state, and report back their status to the apiserver asynchronously.
 
 
-意思是说控制器**只能**通过与Kubernetes API交互来实施协调动作，而不能直接访问状态集群的存储（etcd）或者其他私有的服务[^5]。
+意思是说控制器**只能**通过与Kubernetes API交互来实施协调动作，而不能直接访问状态集群的存储（etcd）或者其他私有的服务。
 
-控制器在Kubernetes**声明式资源管理系统**
 
 Kubernetes集群内置了一些原生资源的控制器，例如Job控制器等。
 当用户声明一个`job`资源后，Job控制器本身并不创建pod资源来执行任务，它而是通过Kubernetes API来创建pod资源来运行任务[^4]，并同时不断将`job`对象的状态"汇报"给Kubernetes API以写入`etcd`中。
@@ -234,7 +233,7 @@ for event := range eventChannel {
         > That is, it watches some object for the world's desired state, and it watches the world's actual state, too.
         > Then, it sends instructions to try and make the world's current state be more like the desired state.
 [^3]: Kubernetes控制器其实借用了自动化中*[closed-loop controller](https://en.wikipedia.org/wiki/Closed-loop_controller)*这个概念。在自动化里，closed-loop controller使用反馈来控制动态系统的状态或输出。它们在本质上是相通的。
-[^4]: 在Kubernetes系统中，真正创建pod资源的动作由kubelet组件完成。
+[^4]: 在Kubernetes系统中，真正创建pod资源的动作由`kubelet`组件完成。
 [^5]: 所谓HTTP"流"指的是HTTP 1.1的*分块传输编码*（[HTTP/1.1 Chunked Transfer Coding](https://en.wikipedia.org/wiki/Chunked_transfer_encoding)）。
       `kube-apiserver`会在返回的头（header）中
       设置`Transfer-Encoding`为`chunked`，表示采用分块传输编码，客户端每读完一个数据块（即资源的变更事件）后，会继续读取或等待下一个数据块，直到客户端主动终止连接或者读到长度为0的数据分块为止。
