@@ -1,0 +1,48 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  # balloons 表示 kind 资源名 
+  # book.doing.io 表示 group 名称
+  name: balloons.book.dong.io
+spec:
+  group: book.dong.io
+  versions:
+    - name: v1
+      served: true
+      # group 中只能有一个 且必须有一个 被标记为存储版本
+      # etcd 中只会存储 storage 为 true 的版本
+      # 这里涉及到不同版本和存储版本之间的转换
+      storage: true
+      additionalPrinterColumns:
+      - jsonPath: .status.status
+        name: Status
+        type: string
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                releaseTime:
+                  type: string
+                  format: date-time
+            status:
+                type: object
+                properties:
+                  status:
+                    type: string
+      subresources:
+        status: {}
+  scope: Namespaced # 标识资源的可见性范围
+  names:
+    # kind 在部署该资源的 yaml 中使用
+    # 一般使用单数形式的驼峰命名
+    kind: Balloon
+    # 名称的复数形式 注意和上面的 metadata 中对应
+    plural: balloons
+    # 单数形式 用于命令行和别名
+    singular: balloon
+    # 资源名称缩写
+    shortNames:
+    - bl

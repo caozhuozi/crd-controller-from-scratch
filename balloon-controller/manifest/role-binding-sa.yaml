@@ -1,0 +1,23 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: balloon-controller-role
+rules:
+- apiGroups: ["book.dong.io"]
+  resources: ["balloons", "balloons/status"]
+  verbs: ["get", "watch", "list", "update", "create", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: balloon-controller-rolebinding
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: balloon-controller-role
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: default
