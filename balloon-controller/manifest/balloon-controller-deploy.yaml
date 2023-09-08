@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: balloon-controller
+  labels:
+    app: balloon-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: balloon-controller
+  template:
+    metadata:
+      labels:
+        app: balloon-controller
+    spec:
+      containers:
+      - name: balloon-controller
+        image: carrotliduo/balloon-controller:v0.19
+        imagePullPolicy: IfNotPresent
