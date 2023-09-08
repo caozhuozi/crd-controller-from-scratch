@@ -95,7 +95,7 @@ const config = {
       },
       announcementBar: {
         id: 'progress',
-        content: `🥳v0.6.0-rc1 is released.🎉`,
+        content: `🥳v0.6.0-rc2 is released.🎉`,
         backgroundColor: '#e6f6e6',
         textColor: '#5f805b',
         isCloseable: true,
