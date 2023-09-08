@@ -41,7 +41,6 @@ The main points that need to be improved are listed below for tracking.
 - [X] we should emphasize that `client-gen` is also not required in "introduction" chapter.
 - [X] the history of "group" and its corresponding concept "apiVersion"(slash) and "core group".
 - [ ] ~~we should add the reference to "controller pattern".~~
-- [ ] should we use release page when we refer to kubernetes version? <- TBD
 - [ ] ~~should we use the exact PR name instead of number when we refer to an PR?~~
 - [ ] the history of API group <- need to explain more. maybe move to the following version of v0.6.0.
 - [ ] ~~the history of "API object" ?~~
@@ -56,12 +55,16 @@ The main points that need to be improved are listed below for tracking.
 - [X] **Spec and Status for Kubernetes Objects**
 - [X] hard decision: we need to do a major revision on "serializer" section. 
       the section should be mainly divided into 3 parts: 1) resource version conversion 2) before v1.2 and 3) after v1.2 <- I'm currently working on this.
-- [ ] Do we also need to add the history of "spec" and "status" fields? <- TBD
-- [ ] Do we need to find the history of "hub and spoke" conversion model? <- maybe move to the following version of v0.6.0.
 - [X] the history of `apimachinery` and `client-go`
 - [X] update "introduction": 
       limit about why we ignore CRD and those  manifests
       style: history
+
+### Remaining TODO List 
+The remaining good points are grouped together for easy tracking.
+- [ ] Do we also need to add the history of "spec" and "status" fields?
+- [ ] Do we need to find the history of "hub and spoke" conversion model?
+- [ ] should we use release page when we refer to kubernetes version?
 
 
 ## Copyright
